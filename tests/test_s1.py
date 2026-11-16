@@ -68,34 +68,33 @@ class TestS1Acceptance(unittest.TestCase):
         self.assertEqual({int(r["page"]) for r in rows_53_57}, {53, 54, 55, 56, 57})
 
     def test_b_fine_items_sum_or_known_diff(self) -> None:
-        """(b) 套用 corrections.csv 後，20 個細目明細加總 = 表頭預算金額，或明確以 _known_diff 登記為未解決差額。"""
+        """(b) 套用 corrections.csv 後，20 個細目明細加總 = 表頭預算金額（09120010102 已依 PDF p53 補齊，T1 已解決）。"""
         checks = self.val_result["fine_item_checks"]
         self.assertEqual(len(checks), 20)
 
         passed_codes = [c["code"] for c in checks if c["passed"]]
-        self.assertEqual(len(passed_codes), 19)
+        self.assertEqual(len(passed_codes), 20)
 
         failed_codes = [c["code"] for c in checks if c["failed"]]
         self.assertEqual(failed_codes, [])
 
         unresolved = [c for c in checks if c["unresolved"]]
-        self.assertEqual(len(unresolved), 1)
-        u_item = unresolved[0]
-        self.assertEqual(u_item["code"], "09120010102")
-        self.assertEqual(u_item["detail_sum_元"], 36_414_792)
-        self.assertEqual(u_item["header_budget_元"], 44_260_000)
-        self.assertEqual(u_item["diff_元"], -7_845_208)
+        self.assertEqual(unresolved, [])
 
-        kd_corr = u_item["known_diff_correction"]
-        self.assertIsNotNone(kd_corr)
-        self.assertEqual(kd_corr["field"], "_known_diff")
-        self.assertEqual(int(kd_corr["old"]), -7_845_208)
-        self.assertEqual(kd_corr["new"], "UNRESOLVED")
-        self.assertTrue(kd_corr["reason"].strip() != "")
+        target = next(c for c in checks if c["code"] == "09120010102")
+        self.assertEqual(target["detail_sum_元"], 44_260_000)
+        self.assertEqual(target["header_budget_元"], 44_260_000)
 
-        report_text = self.report_md.read_text(encoding="utf-8")
-        self.assertIn("## 摘要（未解決待查證項目）", report_text)
-        self.assertIn("未解決，待使用者查證", report_text)
+    def test_b_p53_rows_match_pdf(self) -> None:
+        """p53 依 PDF 原文：7 筆明細，含替代役 15,000、飛彈營區 1,600,000、2-5歲就學補助 6,270,208。"""
+        p53 = [r for r in self.revenue_rows if r["code"] == "09120010102" and int(r["page"]) == 53]
+        self.assertEqual(
+            [int(r["amount_元"]) for r in p53],
+            [149_475, 2_082, 4_800, 20_000, 15_000, 1_600_000, 6_270_208],
+        )
+        self.assertIn("替代役", p53[4]["note"])
+        self.assertIn("飛彈營區", p53[5]["note"])
+        self.assertIn("2-5歲幼兒就學補助", p53[6]["note"])
 
     def test_b_rejects_unregistered_or_mismatched_known_diff(self) -> None:
         """驗證若無 _known_diff 或 _known_diff 差額與實際不符，不會被其他修正掩蓋且視為未套用/失敗。"""
@@ -230,28 +229,20 @@ class TestS1Acceptance(unittest.TestCase):
         self.assertEqual(len(find_unapplied_corrections(fake_corr, [])), 1)
 
     def test_d_revenue_grand_total_and_hierarchy(self) -> None:
-        """(d) 歲入總額 312,678 千元，各款／項跟 part1 的歲入來源別預算總表一致（09120010102 標示為未解決）。"""
+        """(d) 歲入總額 312,678 千元，各款／項跟 part1 的歲入來源別預算總表一致（明細層級全部通過）。"""
         self.assertEqual(self.val_result["expected_grand_total_yuan"], 312_678_000)
         self.assertEqual(self.val_result["total_kuan_header_yuan"], 312_678_000)
         self.assertEqual(self.val_result["grand_total_page"], 4)
 
         for hc in self.val_result["hsiang_checks"]:
             self.assertTrue(hc["header_passed"], f"項不符: {hc}")
-            if hc["科目名稱"] != "上級政府補助收入":
-                self.assertTrue(hc["detail_passed"], f"明細項不符: {hc}")
-                self.assertEqual(hc["detail_status"], "通過")
-            else:
-                self.assertIn("未解決，待使用者查證", hc["detail_status"])
-                self.assertIn("p53–p57 09120010102", hc["detail_status"])
+            self.assertTrue(hc["detail_passed"], f"明細項不符: {hc}")
+            self.assertEqual(hc["detail_status"], "通過")
 
         for kc in self.val_result["kuan_checks"]:
             self.assertTrue(kc["header_passed"], f"款不符: {kc}")
-            if kc["科目名稱"] != "補助及協助收入":
-                self.assertTrue(kc["detail_passed"], f"明細款不符: {kc}")
-                self.assertEqual(kc["detail_status"], "通過")
-            else:
-                self.assertIn("未解決，待使用者查證", kc["detail_status"])
-                self.assertIn("p53–p57 09120010102", kc["detail_status"])
+            self.assertTrue(kc["detail_passed"], f"明細款不符: {kc}")
+            self.assertEqual(kc["detail_status"], "通過")
 
     def test_e_revenue_header_count_matches_toc(self) -> None:
         """(e) 歲入明細的表頭數等於目錄頁數（24），不相等時報錯中止。"""

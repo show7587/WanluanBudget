@@ -8,8 +8,8 @@
 - `revenue_items.csv`、`plans.csv`、`expenditure_items.csv` 之金額欄位亦皆為整數「元」。
 
 未解決資料問題旗標 (`unresolved`)：
-- 從 `data/corrections.csv` 讀取 `field == "_known_diff"` 且 `new == "UNRESOLVED"` 的列（例如 116 年度
-  歲入細目 `09120010102` 差額 `-7845208` 元），不寫死於程式碼中。
+- 從 `data/corrections.csv` 讀取 `field == "_known_diff"` 且 `new == "UNRESOLVED"` 的列（old 為實際差額，
+  例如某細目明細加總與表頭的差額），不寫死於程式碼中。
 - 在 SQLite (`revenue_items`、`plans`、`expenditure_items`) 與 JSON (`site/data/<年度>.json`、`search.json`)
   對應項目帶上 `unresolved`、`unresolved_diff_元`（JSON 亦提供 `diff_元`）與 `note` / `unresolved_note`。
 """

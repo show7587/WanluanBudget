@@ -153,24 +153,16 @@ class TestBuild(unittest.TestCase):
         self.assertEqual(hit["code"], "09120010102")
         self.assertEqual(hit["page"], 54)
 
-    def test_5_unresolved_flag_for_09120010102_in_sqlite_and_json(self) -> None:
-        """未解決的資料問題 09120010102 在 SQLite 與 JSON 中皆帶旗標與說明（由 corrections.csv _known_diff 讀取）。"""
+    def test_5_no_unresolved_flags_after_t1_fix(self) -> None:
+        """T1 已依 PDF p53 補齊：SQLite 與 JSON 中不再有未解決旗標，09120010102 明細加總等於表頭。"""
         conn = sqlite3.connect(str(self.sqlite_path))
         try:
             rows = conn.execute(
-                "SELECT DISTINCT code, unresolved, unresolved_diff_元, unresolved_note "
-                "FROM revenue_items WHERE year=116 AND unresolved=1"
+                "SELECT DISTINCT code FROM revenue_items WHERE year=116 AND unresolved=1"
             ).fetchall()
         finally:
             conn.close()
-
-        self.assertEqual(len(rows), 1)
-        code, unresolved, diff_yuan, note = rows[0]
-        self.assertEqual(code, "09120010102")
-        self.assertEqual(unresolved, 1)
-        self.assertEqual(diff_yuan, -7845208)
-        self.assertIn("36,414,792", note)
-        self.assertIn("44,260,000", note)
+        self.assertEqual(rows, [])
 
         fine_by_code = {
             fine["code"]: fine
@@ -180,17 +172,13 @@ class TestBuild(unittest.TestCase):
             for fine in sub["children"]
         }
         target = fine_by_code["09120010102"]
-        self.assertTrue(target["unresolved"])
-        self.assertEqual(target["diff_元"], -7845208)
+        self.assertFalse(target["unresolved"])
         self.assertEqual(target["amount_元"], 44260000)
-        self.assertEqual(target["detail_amount_元"], 36414792)
+        self.assertEqual(target["detail_amount_元"], 44260000)
         self.assertEqual(target["page_start"], 53)
         self.assertEqual(target["page_end"], 57)
-        self.assertIn("36,414,792", target["note"])
-
-        for c, f in fine_by_code.items():
-            if c != "09120010102":
-                self.assertFalse(f["unresolved"])
+        for f in fine_by_code.values():
+            self.assertFalse(f["unresolved"])
 
     def test_6_hierarchies_structure_and_pages(self) -> None:
         """驗證歲入（款→項→子目→細目）與歲出（政事別→機關→工作計畫→用途別→明細）結構與頁碼。"""

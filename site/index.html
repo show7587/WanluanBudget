@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>萬巒鄉預算查詢</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="#/">萬巒鄉預算查詢</a>
+  <nav class="nav" aria-label="主要導覽">
+    <a href="#/" data-nav="overview">總覽</a>
+    <a href="#/116/歲出" data-nav="exp">歲出</a>
+    <a href="#/116/歲入" data-nav="rev">歲入</a>
+  </nav>
+  <form id="searchForm" class="search" role="search">
+    <input id="q" type="search" placeholder="搜尋名稱、說明、編號" aria-label="搜尋" autocomplete="off">
+    <button type="submit">搜尋</button>
+  </form>
+</header>
+<main id="app" aria-live="polite"><p class="muted">載入中…</p></main>
+<footer class="foot">資料來源：萬巒鄉預算書（OCR 轉檔後人工校正，每筆修正見 data/corrections.csv）。金額單位：元。頁碼為預算書頁碼。</footer>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/minisearch@7.1.0/dist/umd/index.min.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

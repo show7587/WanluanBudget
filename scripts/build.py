@@ -370,7 +370,6 @@ def _build_year_data(
             "unresolved": is_unresolved,
             "note": unresolved_note,
             "unresolved_note": unresolved_note,
-            "items": item_objs,
             "children": item_objs,
         }
         fine_nodes_by_subname[sub_name].append(fine_node)
@@ -453,7 +452,6 @@ def _build_year_data(
                 "page_end": p_end,
                 "unresolved": sub_unresolved,
                 "note": "；".join(sub_notes),
-                "細目": fines,
                 "children": fines,
             }
 
@@ -473,7 +471,6 @@ def _build_year_data(
                 "page_end": p_end,
                 "unresolved": sub_unresolved,
                 "note": "；".join(sub_notes),
-                "子目": [sub_node],
                 "children": [sub_node],
             }
             hsiang_nodes.append(hsiang_node)
@@ -507,7 +504,6 @@ def _build_year_data(
                 "page_end": k_p_end,
                 "unresolved": k_unresolved,
                 "note": "；".join(k_notes),
-                "項": hsiang_nodes,
                 "children": hsiang_nodes,
             }
         )
@@ -604,7 +600,6 @@ def _build_year_data(
                             "unit_price": it["unit_price"],
                             "amount_元": it["amount_元"],
                             "說明": it["說明"],
-                            "text": it["說明"],
                             "經費來源": it["經費來源"],
                             "unresolved": bool(it["unresolved"]),
                         }
@@ -626,8 +621,6 @@ def _build_year_data(
                             "經費來源": first_u["經費來源"],
                             "unresolved": u_unresolved,
                             "note": u_note,
-                            "items": detail_nodes,
-                            "明細": detail_nodes,
                             "children": detail_nodes,
                         }
                     )
@@ -652,8 +645,6 @@ def _build_year_data(
                         "page_end": p["page_end"],
                         "unresolved": p_unresolved,
                         "note": p_note,
-                        "uses": use_nodes,
-                        "用途別": use_nodes,
                         "children": use_nodes,
                     }
                 )
@@ -676,8 +667,6 @@ def _build_year_data(
                     "page_start": d_p_start,
                     "page_end": d_p_end,
                     "unresolved": d_unresolved,
-                    "plans": plan_nodes,
-                    "工作計畫": plan_nodes,
                     "children": plan_nodes,
                 }
             )
@@ -709,8 +698,6 @@ def _build_year_data(
                 "page_start": f_p_start,
                 "page_end": f_p_end,
                 "unresolved": f_unresolved,
-                "depts": dept_nodes,
-                "機關": dept_nodes,
                 "children": dept_nodes,
             }
         )
@@ -775,8 +762,6 @@ def _build_year_data(
             "page_start": rev_min_page,
             "page_end": rev_max_page,
             "hierarchy": rev_kuan_nodes,
-            "款": rev_kuan_nodes,
-            "children": rev_kuan_nodes,
         },
         "expenditure": {
             "total_元": expenditure_total_yuan,
@@ -786,8 +771,6 @@ def _build_year_data(
             "page_start": exp_min_page,
             "page_end": exp_max_page,
             "hierarchy": exp_func_nodes,
-            "政事別": exp_func_nodes,
-            "children": exp_func_nodes,
         },
         "summary_tables": dict(summary_by_table),
     }
@@ -882,7 +865,7 @@ def _build_year_data(
 
 def _write_json_deterministic(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    content = json.dumps(data, ensure_ascii=False, indent=2, sort_keys=False) + "\n"
+    content = json.dumps(data, ensure_ascii=False, separators=(",", ":"), sort_keys=False) + "\n"
     path.write_text(content, encoding="utf-8")
 
 

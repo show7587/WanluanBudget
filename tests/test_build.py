@@ -212,7 +212,7 @@ class TestBuild(unittest.TestCase):
                         self.assertEqual(f["level"], "細目")
                         self.assertIsInstance(f["amount_元"], int)
                         self.assertIsInstance(f["page"], int)
-                        self.assertGreaterEqual(len(f["items"]), 1)
+                        self.assertGreaterEqual(len(f["children"]), 1)
 
         exp_funcs = self.year_116_json["expenditure"]["hierarchy"]
         self.assertEqual(len(exp_funcs), 7)

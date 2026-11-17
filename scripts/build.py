@@ -71,14 +71,20 @@ def load_known_diffs(data_dir: Path) -> dict[tuple[int, str], dict[str, Any]]:
     return result
 
 
+# 暫時不納入建置的年度，資料驗證通過後再移除（見 docs/TODO.md）：
+# 114 年度來源檔被截斷（T5）。
+SKIPPED_YEARS: frozenset[int] = frozenset({114})
+
+
 def discover_years(data_dir: Path) -> list[int]:
-    """掃描 `data_dir` 下所有數字命名的年度子目錄，依年度升冪排序。"""
+    """掃描 `data_dir` 下所有數字命名、且已有 summary.csv 的年度子目錄（排除 SKIPPED_YEARS），依年度升冪排序。"""
     if not data_dir.exists():
         return []
     years: list[int] = []
     for child in data_dir.iterdir():
-        if child.is_dir() and child.name.isdigit():
-            years.append(int(child.name))
+        if child.is_dir() and child.name.isdigit() and int(child.name) not in SKIPPED_YEARS:
+            if (child / "summary.csv").exists():
+                years.append(int(child.name))
     years.sort()
     return years
 

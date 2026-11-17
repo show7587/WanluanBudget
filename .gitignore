@@ -1,2 +1,8 @@
 build/budget.sqlite
 __pycache__/
+
+# 掃描檔來源與轉圖（體積大，可由 PDF 重新產生）
+raw/115/pages_img/
+data/114/*.pdf
+data/115/*.pdf
+.DS_Store

@@ -52,7 +52,7 @@ class TestBuild(unittest.TestCase):
         conn = sqlite3.connect(str(self.sqlite_path))
         try:
             rows = conn.execute(
-                "SELECT page, amount_元 FROM revenue_items WHERE code='01120011701' ORDER BY item_seq"
+                "SELECT page, amount_元 FROM revenue_items WHERE year=116 AND code='01120011701' ORDER BY item_seq"
             ).fetchall()
         finally:
             conn.close()
@@ -80,7 +80,7 @@ class TestBuild(unittest.TestCase):
 
             by_keyword = conn.execute(
                 "SELECT year, code, page, amount_元, note FROM revenue_items "
-                "WHERE note LIKE '%檳榔%'"
+                "WHERE year=116 AND note LIKE '%檳榔%'"
             ).fetchall()
             self.assertEqual(len(by_keyword), 1)
             self.assertEqual(by_keyword[0][:4], (116, "09120010102", 54, 18000))
@@ -144,7 +144,7 @@ class TestBuild(unittest.TestCase):
         hits = [
             doc
             for doc in self.search_json
-            if "檳榔" in doc["text"] or "檳榔" in doc["name"]
+            if doc["year"] == 116 and ("檳榔" in doc["text"] or "檳榔" in doc["name"])
         ]
         self.assertGreaterEqual(len(hits), 1)
         hit = hits[0]
@@ -152,6 +152,23 @@ class TestBuild(unittest.TestCase):
         self.assertEqual(hit["kind"], "revenue")
         self.assertEqual(hit["code"], "09120010102")
         self.assertEqual(hit["page"], 54)
+
+    def test_4b_year_115_is_built_and_totals_match(self) -> None:
+        """115 年度已納入建置：歲出計畫總額 = 271,169,000 元、歲入細目表頭總計 = 261,484,000 元。"""
+        conn = sqlite3.connect(str(self.sqlite_path))
+        try:
+            years = [r[0] for r in conn.execute("SELECT DISTINCT year FROM plans ORDER BY year")]
+            self.assertEqual(years, [115, 116])
+            plan_total = conn.execute("SELECT SUM(總額) FROM plans WHERE year=115").fetchone()[0]
+            self.assertEqual(plan_total, 271169000)
+            n_plans = conn.execute("SELECT COUNT(*) FROM plans WHERE year=115").fetchone()[0]
+            self.assertEqual(n_plans, 48)
+            revenue_total = conn.execute(
+                "SELECT SUM(amount_元) FROM revenue_items WHERE year=115"
+            ).fetchone()[0]
+            self.assertEqual(revenue_total, 261484000)
+        finally:
+            conn.close()
 
     def test_5_no_unresolved_flags_after_t1_fix(self) -> None:
         """T1 已依 PDF p53 補齊：SQLite 與 JSON 中不再有未解決旗標，09120010102 明細加總等於表頭。"""

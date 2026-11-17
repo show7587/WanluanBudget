@@ -21,7 +21,7 @@ from scripts.parse_book import (
     parse_part3_expenditure,
     parse_part3_revenue,
     parse_single_amount,
-    parse_toc,
+    load_toc,
 )
 
 
@@ -53,7 +53,7 @@ def format_diff_status(diff_yuan: int, diff_items: list[dict[str, Any]]) -> str:
     return f"失敗（差 {fmt_yuan(diff_yuan)} 元{source_clause}）"
 
 
-def validate_year(year: str, root_dir: Path = ROOT_DIR) -> dict[str, Any]:
+def validate_year(year: str, root_dir: Path = ROOT_DIR, partial: bool = False) -> dict[str, Any]:
     """Run all S1 validations on data/<year>/*.csv and raw/<year>/*.md, writing report."""
     year_str = str(year)
     raw_dir = root_dir / "raw" / year_str
@@ -63,14 +63,14 @@ def validate_year(year: str, root_dir: Path = ROOT_DIR) -> dict[str, Any]:
     part1_text = (raw_dir / "part1.md").read_text(encoding="utf-8")
     part3_text = (raw_dir / "part3.md").read_text(encoding="utf-8")
 
-    toc = parse_toc(part1_text)
+    toc = load_toc(raw_dir, part1_text)
     corrections = load_corrections(corrections_path, year_str)
 
     _, sum_anomalies, sum_applied, part1_section_checks = parse_part1_summary(
-        part1_text, year_str, toc, corrections
+        part1_text, year_str, toc, corrections, partial=partial
     )
     _, rev_headers, rev_anomalies, rev_applied, rev_header_count = parse_part3_revenue(
-        part3_text, year_str, toc, corrections
+        part3_text, year_str, toc, corrections, partial=partial
     )
     (
         _,
@@ -79,7 +79,7 @@ def validate_year(year: str, root_dir: Path = ROOT_DIR) -> dict[str, Any]:
         exp_anomalies,
         exp_applied,
         exp_header_count,
-    ) = parse_part3_expenditure(part3_text, year_str, toc, corrections)
+    ) = parse_part3_expenditure(part3_text, year_str, toc, corrections, partial=partial)
 
     unregistered_anomalies = sum_anomalies + rev_anomalies + exp_anomalies
     applied_corrections = sum_applied + rev_applied + exp_applied
@@ -903,11 +903,13 @@ def validate_year(year: str, root_dir: Path = ROOT_DIR) -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     args = argv if argv is not None else sys.argv[1:]
+    partial = "--partial" in args
+    args = [a for a in args if a != "--partial"]
     if len(args) != 1:
-        print("用法: python3 scripts/validate.py <年度>", file=sys.stderr)
+        print("用法: python3 scripts/validate.py <年度> [--partial]", file=sys.stderr)
         return 1
     year = args[0]
-    res = validate_year(year)
+    res = validate_year(year, partial=partial)
     unreg_count = len(res["unregistered_anomalies"])
     unapplied_count = len(res["unapplied_corrections"])
     failed_fine_items = [c for c in res["fine_item_checks"] if c["failed"]]

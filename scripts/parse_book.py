@@ -202,6 +202,9 @@ def eval_qty_value(qty_str: str) -> tuple[float | None, bool]:
     product = 1.0
     for p in parts:
         p_clean = p.strip()
+        # 原書數量欄偶爾印有千分位逗號（例如 54,000 票），逗號只可出現在每三位之前
+        if re.match(r"^\d{1,3}(,\d{3})+(\.\d+)?$", p_clean):
+            p_clean = p_clean.replace(",", "")
         if not re.match(r"^\d+(\.\d+)?$", p_clean):
             return (None, False)
         product *= float(p_clean)
@@ -222,6 +225,17 @@ def parse_toc(part1_text: str) -> dict[str, tuple[int, int]]:
             toc[title] = (start_p, end_p)
             if base_title not in toc:
                 toc[base_title] = (start_p, end_p)
+    return toc
+
+
+def load_toc(raw_dir: Path, part1_text: str) -> dict[str, tuple[int, int]]:
+    """Read the TOC from part1.md; if the scan has no TOC page, fall back to a hand-made raw/<年度>/toc.md."""
+    toc = parse_toc(part1_text)
+    if toc:
+        return toc
+    toc_path = raw_dir / "toc.md"
+    if toc_path.exists():
+        return parse_toc(toc_path.read_text(encoding="utf-8"))
     return toc
 
 
@@ -329,15 +343,41 @@ def extract_tables_with_preceding_text(md_text: str) -> list[tuple[str, str]]:
     return results
 
 
+def split_merged_summary_tables(table_html: str) -> list[str]:
+    """Split one <table> that OCR merged from several pages (a second 「科目」 header row inside) into one table per page."""
+    rows = re.findall(r"<tr\b[^>]*>.*?</tr>", table_html, flags=re.DOTALL | re.IGNORECASE)
+    cut_idx = [
+        i
+        for i, r in enumerate(rows)
+        if i > 0 and re.search(r"<td\b[^>]*>\s*科目\s*</td>", r)
+    ]
+    if not cut_idx:
+        return [table_html]
+    bounds = [0] + cut_idx + [len(rows)]
+    return ["<table>" + "".join(rows[a:b]) + "</table>" for a, b in zip(bounds, bounds[1:])]
+
+
 def parse_part1_summary(
     part1_text: str,
     year: str,
     toc: dict[str, tuple[int, int]],
     corrections: dict[tuple[int, str, str], dict[str, str]],
+    partial: bool = False,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
-    """Parse all summary tables in part1.md, verify page counts, and return rows in 元."""
+    """Parse all summary tables in part1.md, verify page counts, and return rows in 元.
+
+    partial=True（OCR 品質較差的年度）：先拆開被合併的跨頁表格，標題文字無法識別時改依目錄順序逐頁分派。
+    """
     blocks = extract_tables_with_preceding_text(part1_text)
+    if partial:
+        expanded: list[tuple[str, str]] = []
+        for preceding, table_html in blocks:
+            pieces = split_merged_summary_tables(table_html)
+            expanded.append((preceding, pieces[0]))
+            expanded.extend(("", piece) for piece in pieces[1:])
+        blocks = expanded
     section_tables: dict[str, list[str]] = {canon: [] for _, canon in PART1_SECTIONS}
+    label_failed = False
 
     for preceding, table_html in blocks:
         matched_canon = None
@@ -348,8 +388,31 @@ def parse_part1_summary(
                 best_pos = idx
                 matched_canon = canon
         if matched_canon is None:
-            raise ValueError(f"無法識別 part1 表格所屬章節，前導文字：{preceding.strip()[-80:]}")
+            if not partial:
+                raise ValueError(f"無法識別 part1 表格所屬章節，前導文字：{preceding.strip()[-80:]}")
+            label_failed = True
+            break
         section_tables[matched_canon].append(table_html)
+
+    assignment = "標題"
+    if partial:
+        label_ok = not label_failed and all(
+            len(section_tables[canon])
+            == (toc.get(key) or toc[canon])[1] - (toc.get(key) or toc[canon])[0] + 1
+            for key, canon in PART1_SECTIONS
+            if key in toc or canon in toc
+        )
+        if not label_ok:
+            # 標題被 OCR 弄丟或錯置：依目錄順序逐頁分派
+            assignment = "目錄順序"
+            section_tables = {canon: [] for _, canon in PART1_SECTIONS}
+            cursor = 0
+            for key, canon in PART1_SECTIONS:
+                if key not in toc and canon not in toc:
+                    continue
+                sp, ep = toc.get(key) or toc[canon]
+                section_tables[canon] = [t for _, t in blocks[cursor : cursor + (ep - sp + 1)]]
+                cursor += ep - sp + 1
 
     summary_rows: list[dict[str, Any]] = []
     unregistered_anomalies: list[dict[str, Any]] = []
@@ -374,6 +437,7 @@ def parse_part1_summary(
                 "expected_pages": expected_pages,
                 "actual_pages": len(tables),
                 "passed": len(tables) == expected_pages,
+                "assignment": assignment,
             }
         )
 
@@ -480,6 +544,11 @@ def parse_part1_summary(
                         corr = corrections[(page, locator, "項")]
                         if hsiang == corr["old"]:
                             hsiang = corr["new"]
+                            applied_corrections.append(corr)
+                    if (page, locator, "科目名稱") in corrections:
+                        corr = corrections[(page, locator, "科目名稱")]
+                        if raw_name == corr["old"]:
+                            raw_name = corr["new"]
                             applied_corrections.append(corr)
                     if kuan:
                         current_kuan = kuan
@@ -613,8 +682,12 @@ def parse_part3_revenue(
     year: str,
     toc: dict[str, tuple[int, int]],
     corrections: dict[tuple[int, str, str], dict[str, str]],
+    partial: bool = False,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], int]:
-    """Parse Part3 revenue detail tables (歲入項目說明提要), infer pages, and apply corrections."""
+    """Parse Part3 revenue detail tables (歲入項目說明提要), infer pages, and apply corrections.
+
+    partial=True：表頭文字被 OCR 漏掉時，改取 part3 開頭的 <table>（歲入明細在最前面，共目錄頁數張）。
+    """
     toc_key = "歲入項目說明提要與預算明細表"
     if toc_key not in toc:
         raise ValueError(f"目次中找不到章節：{toc_key}")
@@ -627,8 +700,11 @@ def parse_part3_revenue(
         if "歲入項目說明提要" in preceding:
             revenue_tables.append(table_html)
 
+    if partial and len(revenue_tables) != expected_pages:
+        revenue_tables = [t for _, t in blocks[:expected_pages]]
+
     header_count = len(revenue_tables)
-    if header_count != expected_pages:
+    if header_count != expected_pages and not partial:
         raise ValueError(
             f"章節「{toc_key}」表頭數 ({header_count}) != 目錄頁數 ({expected_pages}, p{start_page}-p{end_page})"
         )
@@ -643,6 +719,7 @@ def parse_part3_revenue(
     current_dept = ""
     current_raw_row_seq = 0
     current_item_seq = 0
+    current_header_k: int | None = None
 
     for idx, table_html in enumerate(revenue_tables):
         page = start_page + idx
@@ -687,6 +764,7 @@ def parse_part3_revenue(
             header_val_k, ok = parse_single_amount(m_budget.group(1), allow_empty=False)
             if not ok or header_val_k is None:
                 raise ValueError(f"p{page} ({current_code}) 表頭預算金額格式異常：{budget_cell!r}")
+            current_header_k = header_val_k
 
             revenue_headers_meta.append(
                 {
@@ -762,6 +840,15 @@ def parse_part3_revenue(
 
             for sub_row in expanded_rows:
                 current_item_seq += 1
+                # 表頭預算金額為 0 千元的細目，原書的單價與預算數欄是空白，視為 0（不是 OCR 漏字）
+                zero_budget_blank = (
+                    current_header_k == 0
+                    and sub_row["unit_price"].strip() in ("", "-")
+                    and sub_row["amount_元"].strip() in ("", "-")
+                )
+                if zero_budget_blank:
+                    sub_row["unit_price"] = "0"
+                    sub_row["amount_元"] = "0"
                 u_price, ok_price = parse_single_amount(sub_row["unit_price"], allow_empty=False)
                 amt_val, ok_amt = parse_single_amount(sub_row["amount_元"], allow_empty=False)
                 qty_val, ok_qty = eval_qty_value(sub_row["qty"])
@@ -851,6 +938,7 @@ def parse_part3_expenditure(
     year: str,
     toc: dict[str, tuple[int, int]],
     corrections: dict[tuple[int, str, str], dict[str, str]],
+    partial: bool = False,
 ) -> tuple[
     list[dict[str, Any]],
     list[dict[str, Any]],
@@ -859,7 +947,11 @@ def parse_part3_expenditure(
     list[dict[str, Any]],
     int,
 ]:
-    """Parse Part3 expenditure detail tables (歲出計畫說明提要), infer pages, and apply corrections."""
+    """Parse Part3 expenditure detail tables (歲出計畫說明提要), infer pages, and apply corrections.
+
+    partial=True：來源檔被截斷（歲出明細頁數少於目錄）時，只解析現有的頁，不報錯；
+    表頭文字漏掉時，改取歲入明細之後的 <table>，頁碼自目錄起始頁依序推算。
+    """
     toc_key = "歲出計畫說明提要與各項費用明細表"
     if toc_key not in toc:
         raise ValueError(f"目次中找不到章節：{toc_key}")
@@ -872,8 +964,12 @@ def parse_part3_expenditure(
         if "歲出計畫說明提要" in preceding:
             expenditure_tables.append(table_html)
 
+    if partial and len(expenditure_tables) != expected_pages:
+        rev_start, rev_end = toc["歲入項目說明提要與預算明細表"]
+        expenditure_tables = [t for _, t in blocks[rev_end - rev_start + 1 :]]
+
     header_count = len(expenditure_tables)
-    if header_count != expected_pages:
+    if header_count != expected_pages and not partial:
         raise ValueError(
             f"章節「{toc_key}」表頭數 ({header_count}) != 目錄頁數 ({expected_pages}, p{start_page}-p{end_page})"
         )
@@ -1290,7 +1386,7 @@ def parse_part3_expenditure(
     )
 
 
-def parse_book(year: str, root_dir: Path = ROOT_DIR) -> dict[str, Any]:
+def parse_book(year: str, root_dir: Path = ROOT_DIR, partial: bool = False) -> dict[str, Any]:
     """Parse part1 summary tables and part3 revenue & expenditure items for the given year and write CSVs."""
     raw_dir = root_dir / "raw" / str(year)
     part1_path = raw_dir / "part1.md"
@@ -1305,14 +1401,14 @@ def parse_book(year: str, root_dir: Path = ROOT_DIR) -> dict[str, Any]:
     part1_text = part1_path.read_text(encoding="utf-8")
     part3_text = part3_path.read_text(encoding="utf-8")
 
-    toc = parse_toc(part1_text)
+    toc = load_toc(raw_dir, part1_text)
     corrections = load_corrections(corrections_path, str(year))
 
     summary_rows, sum_anomalies, sum_applied, part1_section_checks = parse_part1_summary(
-        part1_text, str(year), toc, corrections
+        part1_text, str(year), toc, corrections, partial=partial
     )
     rev_items, rev_headers, rev_anomalies, rev_applied, rev_header_count = parse_part3_revenue(
-        part3_text, str(year), toc, corrections
+        part3_text, str(year), toc, corrections, partial=partial
     )
     (
         plans_rows,
@@ -1321,7 +1417,7 @@ def parse_book(year: str, root_dir: Path = ROOT_DIR) -> dict[str, Any]:
         exp_anomalies,
         exp_applied,
         exp_header_count,
-    ) = parse_part3_expenditure(part3_text, str(year), toc, corrections)
+    ) = parse_part3_expenditure(part3_text, str(year), toc, corrections, partial=partial)
 
     all_applied = sum_applied + rev_applied + exp_applied
     unapplied_corrections = find_unapplied_corrections(corrections, all_applied)
@@ -1373,11 +1469,13 @@ def parse_book(year: str, root_dir: Path = ROOT_DIR) -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     args = argv if argv is not None else sys.argv[1:]
+    partial = "--partial" in args
+    args = [a for a in args if a != "--partial"]
     if len(args) != 1:
-        print("用法: python3 scripts/parse_book.py <年度>", file=sys.stderr)
+        print("用法: python3 scripts/parse_book.py <年度> [--partial]", file=sys.stderr)
         return 1
     year = args[0]
-    result = parse_book(year)
+    result = parse_book(year, partial=partial)
     print(
         f"[{year}年度] 解析完成：summary.csv {len(result['summary_rows'])} 筆、"
         f"revenue_items.csv {len(result['revenue_items'])} 筆（{len(result['revenue_headers'])} 個細目，"

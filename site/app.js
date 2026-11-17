@@ -60,7 +60,7 @@ async function render() {
       return;
     }
     const data = await loadJson(`data/${year}.json`);
-    setNav(r.view);
+    setNav(r.view, year, index);
     if (r.view === "歲入" || r.view === "歲出") renderDrill(year, r.view, data, r.params);
     else if (r.view === "搜尋") await renderSearch(year, data, r.params);
     else renderOverview(year, data);
@@ -70,7 +70,25 @@ async function render() {
   }
 }
 
-function setNav(view) {
+const $yearSel = document.getElementById("yearSel");
+$yearSel.addEventListener("change", () => {
+  // 換年度：保留目前的畫面（總覽／歲出／歲入／搜尋）；搜尋保留關鍵字，其餘層級篩選因各年度編號不同而捨棄
+  const r = parseHash();
+  const view = r.view || "總覽";
+  const params = view === "搜尋" && r.params.get("q") ? { q: r.params.get("q") } : {};
+  location.hash = href($yearSel.value, view, params);
+});
+
+function setNav(view, year, index) {
+  if (!$yearSel.options.length) {
+    $yearSel.innerHTML = index.years.map((y) => `<option value="${esc(y)}">${esc(y)} 年度</option>`).join("");
+  }
+  $yearSel.value = year;
+  // 導覽連結跟著目前年度走，不寫死
+  document.querySelector('.nav a[data-nav="overview"]').setAttribute("href", href(year, "總覽"));
+  document.querySelector('.nav a[data-nav="exp"]').setAttribute("href", href(year, "歲出"));
+  document.querySelector('.nav a[data-nav="rev"]').setAttribute("href", href(year, "歲入"));
+  document.querySelector(".brand").setAttribute("href", href(year, "總覽"));
   document.querySelectorAll(".nav a").forEach((a) => {
     const on = (a.dataset.nav === "exp" && view === "歲出") || (a.dataset.nav === "rev" && view === "歲入") || (a.dataset.nav === "overview" && view === "總覽");
     a.classList.toggle("on", on);
@@ -292,8 +310,8 @@ function bindFind(year, data) {
 document.getElementById("searchForm").addEventListener("submit", (e) => {
   e.preventDefault();
   const q = document.getElementById("q").value.trim();
-  const y = parseHash().year;
-  location.hash = href(y && /^\d+$/.test(y) ? y : "116", "搜尋", { q });
+  if (!$yearSel.value) return; // 年度資料尚未載入
+  location.hash = href($yearSel.value, "搜尋", { q });
 });
 window.addEventListener("hashchange", render);
 render();

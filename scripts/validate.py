@@ -331,7 +331,7 @@ def validate_year(year: str, root_dir: Path = ROOT_DIR, partial: bool = False) -
     # 3. Expenditure checks (S2):
     #    (a) Every (plan_code, 用途別_code) detail sum == 用途別 subtotal
     #    (b) Every plan's 用途別 subtotals sum == plan 總額
-    #    (c) Plan totals grouped by 政事別 == part1 歲出政事別預算總表 (321,081 千元)
+    #    (c) Plan totals grouped by 政事別 == part1 歲出政事別預算總表 (歲出合計)
     exp_items_by_plan_use: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     exp_items_by_plan: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for r in expenditure_rows:
@@ -728,7 +728,7 @@ def validate_year(year: str, root_dir: Path = ROOT_DIR, partial: bool = False) -
         )
     lines.append("")
 
-    lines.append("## 3. 歲入明細加總檢查（20 個細目逐一核對）")
+    lines.append(f"## 3. 歲入明細加總檢查（{len(fine_item_checks)} 個細目逐一核對）")
     lines.append("")
     lines.append("| # | 細目編號 | 細目名稱 | 頁碼 | 明細筆數 | 明細加總 (元) | 表頭預算金額 (元) | 差額 (元) | 結果 |")
     lines.append("|---|---|---|---|---:|---:|---:|---:|---|")
@@ -741,7 +741,9 @@ def validate_year(year: str, root_dir: Path = ROOT_DIR, partial: bool = False) -
         )
     lines.append("")
 
-    lines.append("## 4. 歲入階層加總檢查（細目 → 子目／項 → 款 → 總計 312,678 千元）")
+    lines.append(
+        f"## 4. 歲入階層加總檢查（細目 → 子目／項 → 款 → 總計 {fmt_yuan(expected_grand_total_yuan // 1000)} 千元）"
+    )
     lines.append("")
     lines.append("### 4.1 子目／項層級核對（對照 part1 歲入來源別預算總表）")
     lines.append("")
@@ -825,7 +827,7 @@ def validate_year(year: str, root_dir: Path = ROOT_DIR, partial: bool = False) -
             )
         lines.append("")
 
-    lines.append("### 6.2 49 個歲出工作計畫逐一核對表")
+    lines.append(f"### 6.2 {len(expenditure_plan_checks)} 個歲出工作計畫逐一核對表")
     lines.append("")
     lines.append("| # | 計畫編號 | 計畫名稱 | 承辦單位 | 政事別 | 頁碼 | 用途別數 | 明細筆數 | 用途別小計加總 (元) | 明細加總 (元) | 計畫總額 (元) | 差額 (元) | 結果 |")
     lines.append("|---|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---|")
@@ -839,7 +841,9 @@ def validate_year(year: str, root_dir: Path = ROOT_DIR, partial: bool = False) -
         )
     lines.append("")
 
-    lines.append("## 7. 歲出政事別階層加總檢查（工作計畫 → 政事別項 → 政事別款 → 總計 321,081 千元）")
+    lines.append(
+        f"## 7. 歲出政事別階層加總檢查（工作計畫 → 政事別項 → 政事別款 → 總計 {fmt_yuan(expected_exp_grand_total_yuan // 1000)} 千元）"
+    )
     lines.append("")
     lines.append("### 7.1 政事別「項」層級核對（對照 part1 歲出政事別預算總表）")
     lines.append("")

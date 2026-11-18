@@ -1206,6 +1206,81 @@ def _write_compare_files(
         _write_json_deterministic(site_path / "compare.json", latest)
 
 
+# 參考表各表的金額單位（CSV 沒有單位欄；以 source_table 目次標題為鍵，已對照 raw/114/part3.md 頁首）。
+# 對不到的表名 unit 為 null，前端顯示「單位請見原書該頁」，不猜。
+_REFERENCE_UNITS = {
+    "各機關歲出一級用途別科目分析總表": "新臺幣千元",
+    "各機關資本支出分析總表": "新臺幣千元",
+    "歲出人事費彙計表": "新臺幣元",
+    "員工總表": "人",
+    "派員出國計畫總表": "新臺幣千元",
+    "派員出國計畫預算類別表-考察、訪問、開會、進修、研究、實習": "新臺幣千元",
+    "派員赴大陸計畫預算類別表": "新臺幣千元",
+    "公務車輛明細表": "新臺幣元",
+    "補助及捐助經費總表": "新臺幣千元",
+    "歲出按職能及經濟性綜合分類表": "新臺幣千元",
+}
+
+_REFERENCE_FILE_RE = re.compile(r"reference_[0-9]+\.json")
+
+
+def _reference_num(text: str) -> int | float | None:
+    if text == "":
+        return None
+    v = float(text)
+    return int(v) if v.is_integer() else v
+
+
+def _build_reference_json(year: int, rows: list[dict[str, str]]) -> dict[str, Any]:
+    """把通用長格式 reference_tables.csv 轉成依表分組的 JSON；文字逐字保留。"""
+    grouped: dict[tuple[int, int], list[dict[str, str]]] = {}
+    for row in rows:
+        grouped.setdefault((int(row["page"]), int(row["table_seq"])), []).append(row)
+    tables: list[dict[str, Any]] = []
+    for (page, seq), trows in sorted(grouped.items()):
+        cells = [
+            {
+                "r": int(r["row_idx"]),
+                "c": int(r["col_idx"]),
+                "rs": int(r["rowspan"]),
+                "cs": int(r["colspan"]),
+                "t": r["text"],
+                "v": _reference_num(r["value_num"]),
+            }
+            for r in trows
+        ]
+        cells.sort(key=lambda x: (x["r"], x["c"]))
+        source_table = trows[0]["source_table"]
+        tables.append(
+            {
+                "page": page,
+                "table_seq": seq,
+                "source_table": source_table,
+                "unit": _REFERENCE_UNITS.get(source_table),
+                "rows": max(c["r"] + c["rs"] for c in cells),
+                "cols": max(c["c"] + c["cs"] for c in cells),
+                "cells": cells,
+            }
+        )
+    return {"year": year, "tables": tables}
+
+
+def _write_reference_files(site_path: Path, years: list[int], data_path: Path) -> list[int]:
+    """有 data/<年度>/reference_tables.csv 的年度輸出 reference_<年度>.json，回傳這些年度。
+
+    同時清除不再對應的殘留檔（只刪完全符合 reference_<數字>.json 的檔案）。
+    """
+    ref_years = [y for y in years if (data_path / str(y) / "reference_tables.csv").is_file()]
+    wanted = {f"reference_{y}.json" for y in ref_years}
+    for path in site_path.iterdir():
+        if path.is_file() and path.name not in wanted and _REFERENCE_FILE_RE.fullmatch(path.name):
+            path.unlink()
+    for y in ref_years:
+        rows = _read_csv(data_path / str(y) / "reference_tables.csv")
+        _write_json_deterministic(site_path / f"reference_{y}.json", _build_reference_json(y, rows))
+    return ref_years
+
+
 def build(
     data_dir: Path | str = ROOT_DIR / "data",
     out_dir: Path | str = ROOT_DIR / "build",
@@ -1423,6 +1498,7 @@ def build(
             "items": items_rows,
             "items_candidates": candidates_rows,
         },
+        "reference_years": _write_reference_files(site_path, years, data_path),
     }
     _write_json_deterministic(site_path / "index.json", index_json)
     _write_json_deterministic(site_path / "search.json", all_search_docs)

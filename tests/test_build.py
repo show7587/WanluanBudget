@@ -366,5 +366,121 @@ class TestBuild(unittest.TestCase):
             self.assertEqual(cw_cands[0][6], "candidate")
 
 
+class TestReferenceTables(unittest.TestCase):
+    """參考表（data/114/reference_tables.csv）輸出 site/data/reference_114.json。"""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._tmpdir = tempfile.TemporaryDirectory()
+        cls.tmp_path = Path(cls._tmpdir.name)
+        cls.site_dir = cls.tmp_path / "site" / "data"
+        build(data_dir=ROOT_DIR / "data", out_dir=cls.tmp_path / "build", site_dir=cls.site_dir)
+        cls.ref = json.loads((cls.site_dir / "reference_114.json").read_text(encoding="utf-8"))
+        with (ROOT_DIR / "data" / "114" / "reference_tables.csv").open(encoding="utf-8", newline="") as f:
+            cls.csv_rows = list(csv.DictReader(f))
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._tmpdir.cleanup()
+
+    def _table(self, page: int) -> dict:
+        return next(t for t in self.ref["tables"] if t["page"] == page)
+
+    def test_tables_and_cell_counts(self) -> None:
+        self.assertEqual(self.ref["year"], 114)
+        self.assertEqual([t["page"] for t in self.ref["tables"]], list(range(154, 174)))
+        total = 0
+        for t in self.ref["tables"]:
+            n = sum(1 for r in self.csv_rows if int(r["page"]) == t["page"])
+            self.assertEqual(len(t["cells"]), n, t["page"])
+            total += len(t["cells"])
+        self.assertEqual(total, 2363)
+        self.assertEqual(len(self.csv_rows), 2363)
+
+    def test_cells_match_csv(self) -> None:
+        by_key = {
+            (int(r["page"]), int(r["row_idx"]), int(r["col_idx"])): r for r in self.csv_rows
+        }
+        for t in self.ref["tables"]:
+            for c in t["cells"]:
+                r = by_key[(t["page"], c["r"], c["c"])]
+                self.assertEqual(c["t"], r["text"])
+                self.assertEqual(c["rs"], int(r["rowspan"]))
+                self.assertEqual(c["cs"], int(r["colspan"]))
+                if r["value_num"] == "":
+                    self.assertIsNone(c["v"])
+                else:
+                    self.assertEqual(c["v"], float(r["value_num"]))
+            self.assertEqual(t["source_table"], next(
+                r["source_table"] for r in self.csv_rows if int(r["page"]) == t["page"]))
+
+    def test_grid_is_self_consistent(self) -> None:
+        for t in self.ref["tables"]:
+            seen = set()
+            for c in t["cells"]:
+                for i in range(c["r"], c["r"] + c["rs"]):
+                    for j in range(c["c"], c["c"] + c["cs"]):
+                        self.assertLess(i, t["rows"])
+                        self.assertLess(j, t["cols"])
+                        self.assertNotIn((i, j), seen, (t["page"], i, j))
+                        seen.add((i, j))
+            self.assertEqual(
+                [(c["r"], c["c"]) for c in t["cells"]],
+                sorted((c["r"], c["c"]) for c in t["cells"]),
+            )
+
+    def test_registered_corrections_preserved(self) -> None:
+        for needle in ("資本移轉", "商品及勞務購買支出", "對家庭及民間非營利機構", "00040000000 鄉公所主管"):
+            hits = [t["page"] for t in self.ref["tables"] if any(needle in c["t"] for c in t["cells"])]
+            self.assertTrue(hits, needle)
+            csv_pages = sorted({int(r["page"]) for r in self.csv_rows if needle in r["text"]})
+            self.assertEqual(hits, csv_pages, needle)
+
+    def test_units(self) -> None:
+        self.assertEqual(self._table(154)["unit"], "新臺幣千元")
+        self.assertEqual(self._table(158)["unit"], "新臺幣元")
+        self.assertEqual(self._table(160)["unit"], "人")
+        self.assertTrue(all(t["unit"] for t in self.ref["tables"]))
+
+    def test_other_years_have_no_reference_file_and_index(self) -> None:
+        names = {p.name for p in self.site_dir.iterdir()}
+        self.assertIn("reference_114.json", names)
+        self.assertNotIn("reference_115.json", names)
+        self.assertNotIn("reference_116.json", names)
+        index = json.loads((self.site_dir / "index.json").read_text(encoding="utf-8"))
+        self.assertEqual(index["reference_years"], [114])
+
+    def test_deterministic_rebuild(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            site2 = Path(tmp) / "site"
+            build(data_dir=ROOT_DIR / "data", out_dir=Path(tmp) / "build", site_dir=site2)
+            self.assertEqual(
+                _sha256(self.site_dir / "reference_114.json"), _sha256(site2 / "reference_114.json")
+            )
+            self.assertEqual(_sha256(self.site_dir / "index.json"), _sha256(site2 / "index.json"))
+
+    def test_stale_reference_files_cleaned_without_collateral(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            t_path = Path(tmp)
+            data = t_path / "data"
+            shutil.copytree(ROOT_DIR / "data" / "116", data / "116")
+            shutil.copy2(ROOT_DIR / "data" / "corrections.csv", data / "corrections.csv")
+            site = t_path / "site"
+            site.mkdir()
+            (site / "reference_114.json").write_text("{}", encoding="utf-8")
+            (site / "reference_115.json").write_text("{}", encoding="utf-8")
+            (site / "reference_notes.json").write_text("keep", encoding="utf-8")
+            (site / "reference_114.json.bak").write_text("keep", encoding="utf-8")
+            (site / "reference_9.json").mkdir()
+            build(data_dir=data, out_dir=t_path / "build", site_dir=site)
+            self.assertFalse((site / "reference_114.json").exists())
+            self.assertFalse((site / "reference_115.json").exists())
+            self.assertEqual((site / "reference_notes.json").read_text(encoding="utf-8"), "keep")
+            self.assertEqual((site / "reference_114.json.bak").read_text(encoding="utf-8"), "keep")
+            self.assertTrue((site / "reference_9.json").is_dir())
+            index = json.loads((site / "index.json").read_text(encoding="utf-8"))
+            self.assertEqual(index["reference_years"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

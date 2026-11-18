@@ -966,7 +966,8 @@ def parse_part3_expenditure(
 
     if partial and len(expenditure_tables) != expected_pages:
         rev_start, rev_end = toc["歲入項目說明提要與預算明細表"]
-        expenditure_tables = [t for _, t in blocks[rev_end - rev_start + 1 :]]
+        rev_pages = rev_end - rev_start + 1
+        expenditure_tables = [t for _, t in blocks[rev_pages : rev_pages + expected_pages]]
 
     header_count = len(expenditure_tables)
     if header_count != expected_pages and not partial:
@@ -993,7 +994,10 @@ def parse_part3_expenditure(
         if not grid:
             continue
 
-        first_row = grid[0]
+        first_row = next(
+            (r for r in grid[:2] if any("業務計畫及工作計畫名稱與編號" in cell for cell in r)),
+            grid[0],
+        )
         if any("業務計畫及工作計畫名稱與編號" in cell for cell in first_row):
             code_name_cell = ""
             dept_cell = ""

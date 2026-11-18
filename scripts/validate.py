@@ -16,9 +16,11 @@ if str(ROOT_DIR) not in sys.path:
 from scripts.parse_book import (
     PLAN_PREFIX_TO_FUNCTION,
     find_unapplied_corrections,
+    has_reference_corrections,
     load_corrections,
     parse_part1_summary,
     parse_part3_expenditure,
+    parse_part3_reference_tables,
     parse_part3_revenue,
     parse_single_amount,
     load_toc,
@@ -82,7 +84,13 @@ def validate_year(year: str, root_dir: Path = ROOT_DIR, partial: bool = False) -
     ) = parse_part3_expenditure(part3_text, year_str, toc, corrections, partial=partial)
 
     unregistered_anomalies = sum_anomalies + rev_anomalies + exp_anomalies
-    applied_corrections = sum_applied + rev_applied + exp_applied
+    # 參考表（p154 之後）修正：只有 corrections.csv 登記了 ref: 修正時才解析，讓未套用判定涵蓋它們。
+    ref_applied: list[dict[str, Any]] = []
+    if has_reference_corrections(corrections):
+        _, ref_applied = parse_part3_reference_tables(
+            part3_text, year_str, toc, partial=partial, corrections=corrections
+        )
+    applied_corrections = sum_applied + rev_applied + exp_applied + ref_applied
     unapplied_corrections = find_unapplied_corrections(corrections, applied_corrections)
 
     summary_csv_path = data_dir / "summary.csv"

@@ -1390,7 +1390,139 @@ def parse_part3_expenditure(
     )
 
 
-def parse_book(year: str, root_dir: Path = ROOT_DIR, partial: bool = False) -> dict[str, Any]:
+REFERENCE_TABLES_FIELDNAMES = [
+    "year",
+    "source_book",
+    "source_table",
+    "page",
+    "table_seq",
+    "row_idx",
+    "col_idx",
+    "rowspan",
+    "colspan",
+    "text",
+    "value_num",
+]
+
+REFERENCE_VALUE_RE = re.compile(r"^-?\d{1,3}(,\d{3})*(\.\d+)?$|^-?\d+(\.\d+)?$")
+
+
+REFERENCE_LOCATOR_PREFIX = "ref:"
+
+
+def reference_cell_locator(row_idx: int, col_idx: int) -> str:
+    """Locator used in corrections.csv for one reference-table cell (field is always 'text')."""
+    return f"{REFERENCE_LOCATOR_PREFIX}r{row_idx}c{col_idx}"
+
+
+def has_reference_corrections(corrections: dict[tuple[int, str, str], dict[str, str]]) -> bool:
+    """True when corrections.csv registers any correction for reference-table cells."""
+    return any(loc.startswith(REFERENCE_LOCATOR_PREFIX) for (_, loc, _) in corrections)
+
+
+def parse_part3_reference_tables(
+    part3_text: str,
+    year: str,
+    toc: dict[str, tuple[int, int]],
+    partial: bool = False,
+    corrections: dict[tuple[int, str, str], dict[str, str]] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Parse the reference tables that follow the expenditure detail tables in part3 (通用長格式，一格一列).
+
+    回傳 (rows, applied_corrections)。corrections.csv 可用 page + locator `ref:r{row_idx}c{col_idx}`
+    + field `text` 修正單一儲存格；僅在儲存格原文與 old 逐字相同時套用，套用後才判定 value_num。
+
+    假設：「歲出計畫說明提要與各項費用明細表」之後，part3 依序為目次中起始頁大於該章節結束頁的
+    各參考表（三、各機關歲出一級用途別科目分析總表 … 十二、歲出按職能及經濟性綜合分類表），
+    且每頁恰好一張 <table>。表數 != 頁數時 raise ValueError，不靜默輸出。
+    不修正 OCR 內容；text 只移除 HTML 標籤並正規化空白，value_num 僅在整格為單一數字時填入。
+    """
+    toc_key = "歲出計畫說明提要與各項費用明細表"
+    if toc_key not in toc:
+        raise ValueError(f"目次中找不到章節：{toc_key}")
+    exp_start, exp_end = toc[toc_key]
+    expected_exp_pages = exp_end - exp_start + 1
+
+    # 後續章節（依頁序，同頁範圍只留第一個標題＝parse_toc 的完整 title）
+    sections: list[tuple[str, int, int]] = []
+    seen_ranges: set[tuple[int, int]] = set()
+    for title, (s, e) in toc.items():
+        if s > exp_end and (s, e) not in seen_ranges:
+            seen_ranges.add((s, e))
+            sections.append((title, s, e))
+    sections.sort(key=lambda x: x[1])
+    if not sections:
+        raise ValueError(f"目次中找不到「{toc_key}」之後的參考表章節")
+    total_pages = sum(e - s + 1 for _, s, e in sections)
+
+    blocks = extract_tables_with_preceding_text(part3_text)
+    exp_indices = [i for i, (pre, _) in enumerate(blocks) if "歲出計畫說明提要" in pre]
+    if len(exp_indices) == expected_exp_pages:
+        last_exp_idx = exp_indices[-1]
+    elif partial:
+        rev_start, rev_end = toc["歲入項目說明提要與預算明細表"]
+        last_exp_idx = (rev_end - rev_start + 1) + expected_exp_pages - 1
+    else:
+        raise ValueError(
+            f"章節「{toc_key}」表頭數 ({len(exp_indices)}) != 目錄頁數 ({expected_exp_pages})，無法定位參考表"
+        )
+
+    ref_tables = [t for _, t in blocks[last_exp_idx + 1 :]]
+    if len(ref_tables) != total_pages:
+        raise ValueError(
+            f"參考表 <table> 數 ({len(ref_tables)}) != 目錄頁數 ({total_pages})，每頁一表假設不成立"
+        )
+
+    rows: list[dict[str, Any]] = []
+    applied_corrections: list[dict[str, Any]] = []
+    corrections = corrections or {}
+    table_iter = iter(ref_tables)
+    for title, s, e in sections:
+        for page in range(s, e + 1):
+            table_html = next(table_iter)
+            parser = HTMLTableGridParser()
+            parser.feed(table_html)
+            occupied: set[tuple[int, int]] = set()
+            for r_idx, row_cells in enumerate(parser.raw_rows):
+                c_idx = 0
+                for text, rowspan, colspan in row_cells:
+                    while (r_idx, c_idx) in occupied:
+                        c_idx += 1
+                    for dr in range(rowspan):
+                        for dc in range(colspan):
+                            occupied.add((r_idx + dr, c_idx + dc))
+                    corr = corrections.get((page, reference_cell_locator(r_idx, c_idx), "text"))
+                    if corr is not None and text == corr["old"]:
+                        text = corr["new"]
+                        applied_corrections.append(corr)
+                    value_num = ""
+                    if REFERENCE_VALUE_RE.match(text):
+                        value_num = text.replace(",", "")
+                    rows.append(
+                        {
+                            "year": year,
+                            "source_book": "part3",
+                            "source_table": title,
+                            "page": page,
+                            "table_seq": 1,
+                            "row_idx": r_idx,
+                            "col_idx": c_idx,
+                            "rowspan": rowspan,
+                            "colspan": colspan,
+                            "text": text,
+                            "value_num": value_num,
+                        }
+                    )
+                    c_idx += colspan
+    return rows, applied_corrections
+
+
+def parse_book(
+    year: str,
+    root_dir: Path = ROOT_DIR,
+    partial: bool = False,
+    reference_tables: bool = False,
+) -> dict[str, Any]:
     """Parse part1 summary tables and part3 revenue & expenditure items for the given year and write CSVs."""
     raw_dir = root_dir / "raw" / str(year)
     part1_path = raw_dir / "part1.md"
@@ -1423,7 +1555,16 @@ def parse_book(year: str, root_dir: Path = ROOT_DIR, partial: bool = False) -> d
         exp_header_count,
     ) = parse_part3_expenditure(part3_text, str(year), toc, corrections, partial=partial)
 
-    all_applied = sum_applied + rev_applied + exp_applied
+    # 參考表只有在帶 --reference-tables 或 corrections.csv 登記了參考表修正時才解析，
+    # 後者是為了讓「已登記但未套用」的判定涵蓋參考表儲存格；CSV 仍只在帶旗標時才寫出。
+    ref_rows: list[dict[str, Any]] = []
+    ref_applied: list[dict[str, Any]] = []
+    if reference_tables or has_reference_corrections(corrections):
+        ref_rows, ref_applied = parse_part3_reference_tables(
+            part3_text, str(year), toc, partial=partial, corrections=corrections
+        )
+
+    all_applied = sum_applied + rev_applied + exp_applied + ref_applied
     unapplied_corrections = find_unapplied_corrections(corrections, all_applied)
 
     out_dir = root_dir / "data" / str(year)
@@ -1453,7 +1594,15 @@ def parse_book(year: str, root_dir: Path = ROOT_DIR, partial: bool = False) -> d
         writer.writeheader()
         writer.writerows(exp_items)
 
+    if reference_tables:
+        ref_csv_path = out_dir / "reference_tables.csv"
+        with ref_csv_path.open("w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=REFERENCE_TABLES_FIELDNAMES)
+            writer.writeheader()
+            writer.writerows(ref_rows)
+
     return {
+        "reference_table_rows": ref_rows,
         "year": str(year),
         "toc": toc,
         "part1_section_checks": part1_section_checks,
@@ -1474,12 +1623,13 @@ def parse_book(year: str, root_dir: Path = ROOT_DIR, partial: bool = False) -> d
 def main(argv: list[str] | None = None) -> int:
     args = argv if argv is not None else sys.argv[1:]
     partial = "--partial" in args
-    args = [a for a in args if a != "--partial"]
+    reference_tables = "--reference-tables" in args
+    args = [a for a in args if a not in ("--partial", "--reference-tables")]
     if len(args) != 1:
-        print("用法: python3 scripts/parse_book.py <年度> [--partial]", file=sys.stderr)
+        print("用法: python3 scripts/parse_book.py <年度> [--partial] [--reference-tables]", file=sys.stderr)
         return 1
     year = args[0]
-    result = parse_book(year, partial=partial)
+    result = parse_book(year, partial=partial, reference_tables=reference_tables)
     print(
         f"[{year}年度] 解析完成：summary.csv {len(result['summary_rows'])} 筆、"
         f"revenue_items.csv {len(result['revenue_items'])} 筆（{len(result['revenue_headers'])} 個細目，"

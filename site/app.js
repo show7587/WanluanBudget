@@ -459,6 +459,7 @@ async function renderReference(year, params) {
     <ul class="toc">${toc}</ul>
     <h2>${esc(t.source_table)}</h2>
     <p>預算書第 ${esc(t.page)} 頁　單位：${t.unit ? esc(t.unit) : "單位請見原書該頁"}</p>
+    ${t.note ? `<p class="warn">${esc(t.note)}</p>` : ""}
     ${pager}
     <div class="tablewrap ref"><table class="reftable"><tbody>${body.join("")}</tbody></table></div>
     ${pager}`;

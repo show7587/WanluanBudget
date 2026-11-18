@@ -30,7 +30,7 @@ function mkEl(extra = {}) {
 
 // navMode: "current" = 目前的 index.html（有 data-nav="ref" 的導覽連結）
 //          "legacy"  = 舊版 index.html（沒有該連結；舊頁被瀏覽器快取、卻載入新版 app.js 的情況）
-async function runScenario(hash, navMode) {
+async function runScenario(hash, navMode, opts = {}) {
   const hashListeners = [];
   const location = {
     _h: hash,
@@ -69,7 +69,13 @@ async function runScenario(hash, navMode) {
     fetch: async (p) => {
       const file = path.join(siteDir, p);
       if (!fs.existsSync(file)) return { ok: false, status: 404 };
-      const text = fs.readFileSync(file, "utf8");
+      let text = fs.readFileSync(file, "utf8");
+      if (opts.injectNote && p === "data/reference_114.json") {
+        // 測試跳脫：把 p165 的提示換成一段惡意字串
+        const d = JSON.parse(text);
+        d.tables.find((x) => x.page === 165).note = opts.injectNote;
+        text = JSON.stringify(d);
+      }
       return { ok: true, status: 200, json: async () => JSON.parse(text) };
     },
   };
@@ -83,6 +89,7 @@ async function runScenario(hash, navMode) {
   return {
     hash,
     navMode,
+    injected: Boolean(opts.injectNote),
     finalHash: location._h,
     html: app.innerHTML,
     failed: app.innerHTML.includes("載入失敗"),
@@ -100,9 +107,13 @@ async function runScenario(hash, navMode) {
     ["#/115/總覽", "legacy"],
     ["#/116/歲入", "legacy"],
     ["#/114/參考表?p=170", "legacy"],
+    ["#/114/參考表?p=154", "current"],
+    ["#/114/參考表?p=165", "current"],
+    ["#/114/參考表?p=168", "current"],
+    ["#/114/參考表?p=165", "current", { injectNote: "<img src=x onerror=alert(1)>" }],
   ];
   const out = [];
-  for (const [hash, mode] of scenarios) out.push(await runScenario(hash, mode));
+  for (const [hash, mode, opts] of scenarios) out.push(await runScenario(hash, mode, opts));
   process.stdout.write(JSON.stringify(out));
 })().catch((e) => {
   console.error(e);

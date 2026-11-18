@@ -1231,6 +1231,15 @@ def _reference_num(text: str) -> int | float | None:
     return int(v) if v.is_integer() else v
 
 
+# 表層級的資料品質提示（顯示在參考表頁）。只放「對照原件影像後確認」的問題；問題修好後要移除。
+_REFERENCE_NOTES = {
+    "公務車輛明細表": (
+        "本表（p165–p168）部分儲存格因轉檔有黏連，例如 p165 的車輛數「243」其實是 24 與 3"
+        "（原書分在兩列，轉檔時併成一列），金額也可能錯位；p166、p168 尚未逐格對照原書，請以原書為準。"
+    ),
+}
+
+
 def _build_reference_json(year: int, rows: list[dict[str, str]]) -> dict[str, Any]:
     """把通用長格式 reference_tables.csv 轉成依表分組的 JSON；文字逐字保留。"""
     grouped: dict[tuple[int, int], list[dict[str, str]]] = {}
@@ -1251,17 +1260,19 @@ def _build_reference_json(year: int, rows: list[dict[str, str]]) -> dict[str, An
         ]
         cells.sort(key=lambda x: (x["r"], x["c"]))
         source_table = trows[0]["source_table"]
-        tables.append(
-            {
-                "page": page,
-                "table_seq": seq,
-                "source_table": source_table,
-                "unit": _REFERENCE_UNITS.get(source_table),
-                "rows": max(c["r"] + c["rs"] for c in cells),
-                "cols": max(c["c"] + c["cs"] for c in cells),
-                "cells": cells,
-            }
-        )
+        table: dict[str, Any] = {
+            "page": page,
+            "table_seq": seq,
+            "source_table": source_table,
+            "unit": _REFERENCE_UNITS.get(source_table),
+        }
+        note = _REFERENCE_NOTES.get(source_table)
+        if note:
+            table["note"] = note
+        table["rows"] = max(c["r"] + c["rs"] for c in cells)
+        table["cols"] = max(c["c"] + c["cs"] for c in cells)
+        table["cells"] = cells
+        tables.append(table)
     return {"year": year, "tables": tables}
 
 

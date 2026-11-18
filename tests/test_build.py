@@ -386,6 +386,23 @@ class TestReferenceTables(unittest.TestCase):
     def _table(self, page: int) -> dict:
         return next(t for t in self.ref["tables"] if t["page"] == page)
 
+    def test_vehicle_table_pages_carry_a_data_quality_note(self) -> None:
+        """公務車輛明細表（p165–p168）帶有黏連儲存格的提示；其他表沒有。"""
+        for t in self.ref["tables"]:
+            if 165 <= t["page"] <= 168:
+                self.assertEqual(t["source_table"], "公務車輛明細表", t["page"])
+                self.assertIn("黏連", t["note"])
+                self.assertIn("243", t["note"])
+                self.assertIn("24", t["note"])
+            else:
+                self.assertNotIn("note", t, t["page"])
+
+    def test_vehicle_note_example_is_real_data(self) -> None:
+        """提示舉的例子必須真的存在：p165 車輛數欄有儲存格 243（= 24 + 3）。
+        日後若這個黏連被修正，這個測試會失敗，提醒同時移除 build.py 的 _REFERENCE_NOTES。"""
+        glued = [c for c in self._table(165)["cells"] if c["c"] == 1 and c["t"] == "243"]
+        self.assertEqual(len(glued), 1)
+
     def test_tables_and_cell_counts(self) -> None:
         self.assertEqual(self.ref["year"], 114)
         self.assertEqual([t["page"] for t in self.ref["tables"]], list(range(154, 174)))

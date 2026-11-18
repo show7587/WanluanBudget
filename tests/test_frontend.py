@@ -33,9 +33,9 @@ class TestSetNavTolerance(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.results = run_harness()
 
-    def _get(self, hash_: str, nav_mode: str) -> dict:
+    def _get(self, hash_: str, nav_mode: str, injected: bool = False) -> dict:
         for r in self.results:
-            if r["hash"] == hash_ and r["navMode"] == nav_mode:
+            if r["hash"] == hash_ and r["navMode"] == nav_mode and r["injected"] == injected:
                 return r
         raise AssertionError(f"沒有情境 {hash_} / {nav_mode}")
 
@@ -62,6 +62,31 @@ class TestSetNavTolerance(unittest.TestCase):
         self.assertFalse(r114["refHidden"])
         self.assertEqual(r114["refHref"], "#/114/參考表")
         self.assertTrue(r115["refHidden"])
+
+
+    def test_vehicle_table_pages_show_the_glue_note_and_other_pages_do_not(self) -> None:
+        """公務車輛明細表（p165–p168）頁面頂端顯示黏連提示；其他參考表頁不顯示。"""
+        for page in (165, 168):
+            with self.subTest(page=page):
+                r = self._get(f"#/114/參考表?p={page}", "current")
+                self.assertFalse(r["failed"], r["html"][:200])
+                self.assertIn('<p class="warn">', r["html"])
+                self.assertIn("黏連", r["html"])
+                self.assertIn("243", r["html"])
+                # 提示在單位那一行之後、表格之前
+                self.assertLess(r["html"].index("單位："), r["html"].index('<p class="warn">'))
+                self.assertLess(r["html"].index('<p class="warn">'), r["html"].index("reftable"))
+        r154 = self._get("#/114/參考表?p=154", "current")
+        self.assertFalse(r154["failed"], r154["html"][:200])
+        self.assertNotIn('<p class="warn">', r154["html"])
+        self.assertNotIn("黏連", r154["html"])
+
+    def test_table_note_is_html_escaped(self) -> None:
+        """提示文字經 esc() 跳脫，不可變成可執行的 HTML。"""
+        r = self._get("#/114/參考表?p=165", "current", injected=True)
+        self.assertFalse(r["failed"], r["html"][:200])
+        self.assertIn("&lt;img src=x onerror=alert(1)&gt;", r["html"])
+        self.assertNotIn("<img src=x", r["html"])
 
 
 @unittest.skipUnless(NODE, "需要 node 才能執行前端測試")

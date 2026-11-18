@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 from scripts.build import ROOT_DIR, build
 
@@ -17,7 +18,7 @@ def _sha256(path: Path) -> str:
 
 
 class TestCompare(unittest.TestCase):
-    """Verify compare.json generation, sampling, single-year cleanup, and 114 skipping using temp dirs."""
+    """Verify compare.json generation, sampling, single-year cleanup, and the SKIPPED_YEARS mechanism using temp dirs."""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -199,7 +200,11 @@ class TestCompare(unittest.TestCase):
             self.assertTrue((site_1yr / "116.json").exists())
 
     def test_c_year_114_with_blank_amounts_in_temp_data_dir_is_skipped(self) -> None:
-        """(c) 把含空白金額欄位的 114 資料夾放進暫存 data 目錄，build 仍成功且 years == [115, 116]。"""
+        """(c) SKIPPED_YEARS 機制仍有效：把含空白金額欄位的 114 資料夾放進暫存 data 目錄並暫時列入 SKIPPED_YEARS，build 仍成功且 years == [115, 116]。
+
+        114 已通過驗證並納入真實建置（SKIPPED_YEARS 目前為空），這裡用 mock 暫時把 114 列入跳過清單，
+        以保留「資料不完整的年度可被跳過」這個機制的測試。
+        """
         with tempfile.TemporaryDirectory() as tmp:
             t_path = Path(tmp)
             custom_data = t_path / "data"
@@ -234,7 +239,8 @@ class TestCompare(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            res = build(data_dir=custom_data, out_dir=out_dir, site_dir=site_dir)
+            with mock.patch("scripts.build.SKIPPED_YEARS", frozenset({114})):
+                res = build(data_dir=custom_data, out_dir=out_dir, site_dir=site_dir)
             self.assertEqual(res["years"], [115, 116])
             self.assertTrue((site_dir / "compare.json").exists())
             self.assertFalse((site_dir / "114.json").exists())

@@ -158,7 +158,7 @@ class TestBuild(unittest.TestCase):
         conn = sqlite3.connect(str(self.sqlite_path))
         try:
             years = [r[0] for r in conn.execute("SELECT DISTINCT year FROM plans ORDER BY year")]
-            self.assertEqual(years, [115, 116])
+            self.assertEqual(years, [114, 115, 116])
             plan_total = conn.execute("SELECT SUM(總額) FROM plans WHERE year=115").fetchone()[0]
             self.assertEqual(plan_total, 271169000)
             n_plans = conn.execute("SELECT COUNT(*) FROM plans WHERE year=115").fetchone()[0]
@@ -169,6 +169,39 @@ class TestBuild(unittest.TestCase):
             self.assertEqual(revenue_total, 261484000)
         finally:
             conn.close()
+
+    def test_4c_year_114_is_built_and_totals_match(self) -> None:
+        """114 年度已納入建置：歲出計畫總額 = 324,677,000 元、歲入明細合計 = 271,527,000 元，歲入階層含款 01–07 且加總等於總額。"""
+        conn = sqlite3.connect(str(self.sqlite_path))
+        try:
+            plan_total = conn.execute("SELECT SUM(總額) FROM plans WHERE year=114").fetchone()[0]
+            self.assertEqual(plan_total, 324677000)
+            n_plans = conn.execute("SELECT COUNT(*) FROM plans WHERE year=114").fetchone()[0]
+            self.assertEqual(n_plans, 50)
+            revenue_total = conn.execute(
+                "SELECT SUM(amount_元) FROM revenue_items WHERE year=114"
+            ).fetchone()[0]
+            self.assertEqual(revenue_total, 271527000)
+        finally:
+            conn.close()
+
+        self.assertEqual(self.index_json["years"], [114, 115, 116])
+        self.assertEqual(self.index_json["default_year"], 116)
+
+        year_114 = json.loads((self.site_dir / "114.json").read_text(encoding="utf-8"))
+        self.assertEqual(year_114["overview"]["revenue_total_元"], 271527000)
+        self.assertEqual(year_114["overview"]["expenditure_total_元"], 324677000)
+        self.assertEqual(year_114["overview"]["balance_元"], -53150000)
+        self.assertEqual(year_114["overview"]["unresolved_items"], [])
+        # p5 總表款項碼修正（捐獻收入 06/01、其他收入 07/空）後，歲入階層必須含款 07 且加總等於總額
+        hierarchy = year_114["revenue"]["hierarchy"]
+        self.assertEqual([h["code"] for h in hierarchy], ["01", "02", "03", "04", "05", "06", "07"])
+        self.assertEqual(
+            sum(h["amount_元"] for h in hierarchy), year_114["overview"]["revenue_total_元"]
+        )
+        self.assertEqual(
+            sum(h["detail_amount_元"] for h in hierarchy), year_114["overview"]["revenue_total_元"]
+        )
 
     def test_5_no_unresolved_flags_after_t1_fix(self) -> None:
         """T1 已依 PDF p53 補齊：SQLite 與 JSON 中不再有未解決旗標，09120010102 明細加總等於表頭。"""

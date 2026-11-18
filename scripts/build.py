@@ -71,9 +71,9 @@ def load_known_diffs(data_dir: Path) -> dict[tuple[int, str], dict[str, Any]]:
     return result
 
 
-# 暫時不納入建置的年度，資料驗證通過後再移除（見 docs/TODO.md）：
-# 114 年度來源檔被截斷（T5）。
-SKIPPED_YEARS: frozenset[int] = frozenset({114})
+# 暫時不納入建置的年度，資料驗證通過後再移除（見 docs/TODO.md）。
+# 目前沒有需要跳過的年度；114 已於資料驗證通過後納入（T5）。機制保留，供日後資料不完整的年度使用。
+SKIPPED_YEARS: frozenset[int] = frozenset()
 
 
 def discover_years(data_dir: Path) -> list[int]:

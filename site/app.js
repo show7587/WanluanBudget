@@ -165,9 +165,12 @@ function setNav(view, year, index) {
   document.querySelector('.nav a[data-nav="rev"]').setAttribute("href", href(year, "歲入"));
   document.querySelector(".brand").setAttribute("href", href(year, "總覽"));
   // 「參考表」只有該年度有參考表資料時才顯示
+  // 瀏覽器可能快取了舊版 index.html（沒有這個連結）卻載入新版 app.js，找不到時略過，不可丟錯
   const refA = document.querySelector('.nav a[data-nav="ref"]');
-  refA.setAttribute("href", href(year, "參考表"));
-  refA.hidden = !hasReference(index, year);
+  if (refA) {
+    refA.setAttribute("href", href(year, "參考表"));
+    refA.hidden = !hasReference(index, year);
+  }
   document.querySelectorAll(".nav a").forEach((a) => {
     const on = (a.dataset.nav === "ref" && view === "參考表") || (a.dataset.nav === "exp" && view === "歲出") || (a.dataset.nav === "rev" && view === "歲入") || (a.dataset.nav === "overview" && view === "總覽");
     a.classList.toggle("on", on);

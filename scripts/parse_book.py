@@ -540,6 +540,11 @@ def parse_part1_summary(
                     if not raw_name:
                         continue
                     locator = f"{canon_table_name}:{kuan}-{hsiang}-{raw_name}"
+                    if (page, locator, "款") in corrections:
+                        corr = corrections[(page, locator, "款")]
+                        if kuan == corr["old"]:
+                            kuan = corr["new"]
+                            applied_corrections.append(corr)
                     if (page, locator, "項") in corrections:
                         corr = corrections[(page, locator, "項")]
                         if hsiang == corr["old"]:

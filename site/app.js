@@ -40,14 +40,35 @@ async function loadJson(path) {
   return cache[path];
 }
 
-let comparePromise = null;
-async function getCompare() {
-  if (!comparePromise) {
-    comparePromise = fetch("data/compare.json")
+// 比較資料依相鄰年度對（如 "114-115"）取得；404 或失敗視為沒有比較。
+const comparePromises = {};
+async function getCompare(pair) {
+  if (!pair) return null;
+  if (!comparePromises[pair]) {
+    comparePromises[pair] = fetch(`data/compare_${pair.replace("-", "_")}.json`)
       .then((r) => (r.ok ? r.json() : null))
       .catch(() => null);
   }
-  return comparePromise;
+  return comparePromises[pair];
+}
+
+// 相鄰年度對：由 index.years 推出，如 ["114-115", "115-116"]
+function adjacentPairs(index) {
+  const ys = index.years.map(Number).sort((a, b) => a - b);
+  return ys.slice(1).map((y, i) => `${ys[i]}-${y}`);
+}
+
+// 年度 Y 預設的比較對：(Y, Y+1) 若存在，否則 (Y-1, Y)；都沒有則 null
+function defaultPair(index, year) {
+  const y = Number(year), pairs = adjacentPairs(index);
+  return pairs.find((p) => p.startsWith(`${y}-`)) || pairs.find((p) => p.endsWith(`-${y}`)) || null;
+}
+
+// 比較頁可用 pair=a-b 指定比較對；無效或缺少時用預設規則
+function pickPair(index, year, params) {
+  const want = params && params.get("pair");
+  if (want && adjacentPairs(index).includes(want)) return want;
+  return defaultPair(index, year);
 }
 
 function hasCompareEntry(compare, kind, code) {
@@ -94,14 +115,19 @@ async function render() {
       $app.innerHTML = `<p class="warn">找不到年度 ${esc(year)}。</p>`;
       return;
     }
+    const pair = pickPair(index, year, r.view === "比較" ? r.params : null);
     const [data, compare] = await Promise.all([
       loadJson(`data/${year}.json`),
-      getCompare(),
+      getCompare(pair),
     ]);
     setNav(r.view, year, index);
     if (r.view === "歲入" || r.view === "歲出") renderDrill(year, r.view, data, r.params, compare);
     else if (r.view === "搜尋") await renderSearch(year, data, r.params, compare);
-    else if (r.view === "比較") renderCompare(year, data, r.params, compare);
+    else if (r.view === "比較") renderCompare(year, data, r.params, compare, pair, defaultPair(index, year));
+    else if (r.view === "參考表") {
+      if (!hasReference(index, year)) { location.replace(href(year, "總覽")); return; } // 該年度沒有參考表：導向總覽
+      await renderReference(year, r.params);
+    }
     else renderOverview(year, data);
     window.scrollTo(0, 0);
   } catch (e) {
@@ -115,8 +141,16 @@ $yearSel.addEventListener("change", () => {
   const r = parseHash();
   const view = r.view || "總覽";
   let params = {};
+  if (view === "參考表") {
+    // 切到沒有參考表的年度時導向該年度總覽；有參考表的年度保留 p
+    loadJson("data/index.json").then((index) => {
+      if (!hasReference(index, $yearSel.value)) location.hash = href($yearSel.value, "總覽");
+      else location.hash = href($yearSel.value, "參考表", r.params.get("p") ? { p: r.params.get("p") } : {});
+    }).catch(() => { location.hash = href($yearSel.value, "總覽"); });
+    return;
+  }
   if (view === "搜尋" && r.params.get("q")) params = { q: r.params.get("q") };
-  else if (view === "比較") params = Object.fromEntries(r.params.entries());
+  else if (view === "比較") { params = Object.fromEntries(r.params.entries()); delete params.pair; } // pair 依新年度重新決定
   location.hash = href($yearSel.value, view, params);
 });
 
@@ -130,8 +164,15 @@ function setNav(view, year, index) {
   document.querySelector('.nav a[data-nav="exp"]').setAttribute("href", href(year, "歲出"));
   document.querySelector('.nav a[data-nav="rev"]').setAttribute("href", href(year, "歲入"));
   document.querySelector(".brand").setAttribute("href", href(year, "總覽"));
+  // 「參考表」只有該年度有參考表資料時才顯示
+  // 瀏覽器可能快取了舊版 index.html（沒有這個連結）卻載入新版 app.js，找不到時略過，不可丟錯
+  const refA = document.querySelector('.nav a[data-nav="ref"]');
+  if (refA) {
+    refA.setAttribute("href", href(year, "參考表"));
+    refA.hidden = !hasReference(index, year);
+  }
   document.querySelectorAll(".nav a").forEach((a) => {
-    const on = (a.dataset.nav === "exp" && view === "歲出") || (a.dataset.nav === "rev" && view === "歲入") || (a.dataset.nav === "overview" && view === "總覽");
+    const on = (a.dataset.nav === "ref" && view === "參考表") || (a.dataset.nav === "exp" && view === "歲出") || (a.dataset.nav === "rev" && view === "歲入") || (a.dataset.nav === "overview" && view === "總覽");
     a.classList.toggle("on", on);
   });
 }
@@ -362,12 +403,76 @@ async function renderSearch(year, data, params, compare) {
   $app.innerHTML = `<h1>搜尋：${esc(q)}</h1><div class="filters">${chips.join("")}</div>${list.join("") || '<p class="muted">沒有符合的結果。</p>'}${shown.length > 100 ? `<p class="note">只顯示前 100 筆，共 ${shown.length} 筆，請加上更多關鍵字。</p>` : ""}`;
 }
 
+// ---------- 參考表 ----------
+const hasReference = (index, year) => (index.reference_years || []).map(String).includes(String(year));
+
+function referenceNotFound(msg) {
+  $app.innerHTML = `<p class="warn">找不到參考表：${esc(msg)}</p>`;
+}
+
+async function renderReference(year, params) {
+  let ref;
+  try {
+    ref = await loadJson(`data/reference_${year}.json`);
+  } catch (e) {
+    referenceNotFound(`${year} 年度的參考表資料載入失敗。`);
+    return;
+  }
+  const tables = (ref && ref.tables) || [];
+  if (!tables.length) { referenceNotFound(`${year} 年度沒有參考表資料。`); return; }
+  const want = params.get("p");
+  const idx = want === null || want === "" ? 0 : tables.findIndex((t) => String(t.page) === want.trim());
+  if (idx < 0) { referenceNotFound(`${year} 年度沒有第 ${want} 頁的參考表。`); return; }
+  const t = tables[idx];
+
+  // 目次：依 source_table 分組（相鄰頁同名併為一組），顯示頁碼範圍與各頁連結
+  const groups = [];
+  tables.forEach((tb) => {
+    const last = groups[groups.length - 1];
+    if (last && last.name === tb.source_table) last.pages.push(tb.page);
+    else groups.push({ name: tb.source_table, pages: [tb.page] });
+  });
+  const toc = groups.map((g) => {
+    const s = g.pages[0], e = g.pages[g.pages.length - 1];
+    const range = s === e ? `p${s}` : `p${s}–${e}`;
+    const links = g.pages.map((pg) => `<a class="chip ${pg === t.page ? "on" : ""}" href="${esc(href(year, "參考表", { p: pg }))}">p${esc(pg)}</a>`).join("");
+    return `<li><span class="toc-name">${esc(g.name)}</span> <span class="muted">${esc(range)}</span> <span class="filters">${links}</span></li>`;
+  }).join("");
+
+  const prev = tables[idx - 1], next = tables[idx + 1];
+  const pager = `<div class="pager">${prev ? `<a class="btn btn-sm" href="${esc(href(year, "參考表", { p: prev.page }))}">‹ 上一頁（p${esc(prev.page)}）</a>` : '<span class="muted">‹ 上一頁</span>'}
+    ${next ? `<a class="btn btn-sm" href="${esc(href(year, "參考表", { p: next.page }))}">下一頁（p${esc(next.page)}） ›</a>` : '<span class="muted">下一頁 ›</span>'}</div>`;
+
+  // 依 r、c、rs、cs 還原合併儲存格；顯示文字以 t 為準，不重新格式化
+  const byRow = [];
+  t.cells.forEach((c) => { (byRow[c.r] = byRow[c.r] || []).push(c); });
+  const body = [];
+  for (let r = 0; r < t.rows; r++) {
+    const tds = (byRow[r] || []).sort((a, b) => a.c - b.c).map((c) =>
+      `<td${c.rs > 1 ? ` rowspan="${esc(c.rs)}"` : ""}${c.cs > 1 ? ` colspan="${esc(c.cs)}"` : ""}${c.v !== null && c.v !== undefined ? ' class="num"' : ""}>${esc(c.t)}</td>`
+    ).join("");
+    body.push(`<tr>${tds}</tr>`);
+  }
+  $app.innerHTML = `
+    <h1>參考表</h1>
+    <p class="note">這是預算書參考表的原樣呈現，儲存格內容依 OCR 轉檔，只套用 data/corrections.csv 登記過的修正；金額單位依各表標示。</p>
+    <ul class="toc">${toc}</ul>
+    <h2>${esc(t.source_table)}</h2>
+    <p>預算書第 ${esc(t.page)} 頁　單位：${t.unit ? esc(t.unit) : "單位請見原書該頁"}</p>
+    ${t.note ? `<p class="warn">${esc(t.note)}</p>` : ""}
+    ${pager}
+    <div class="tablewrap ref"><table class="reftable"><tbody>${body.join("")}</tbody></table></div>
+    ${pager}`;
+}
+
 // ---------- 跨年度比較 ----------
-function renderCompare(year, data, params, compare) {
+function renderCompare(year, data, params, compare, pair, defPair) {
+  // 只有指定了非預設比較對時才把 pair 帶進連結，預設情況網址維持原樣
+  const cmpHref = (kind, code) => href(year, "比較", pair && pair !== defPair ? { kind, code, pair } : { kind, code });
   const kind = (params.get("kind") || "").trim();
   const code = (params.get("code") || "").trim();
   if (!compare || !compare.entries) {
-    $app.innerHTML = `<p class="warn">比較功能不可用（找不到 compare.json）。</p>`;
+    $app.innerHTML = `<p class="warn">比較功能不可用（找不到比較資料）。</p>`;
     return;
   }
   const key = `${kind}:${code}`;
@@ -394,7 +499,7 @@ function renderCompare(year, data, params, compare) {
     if (idx === chain.length - 1) {
       crumbs.push(`<strong>${esc(label)}（比較）</strong>`);
     } else {
-      crumbs.push(`<a href="${esc(href(year, "比較", { kind: item.kind, code: item.code }))}">${esc(label)}</a>`);
+      crumbs.push(`<a href="${esc(cmpHref(item.kind, item.code))}">${esc(label)}</a>`);
     }
   });
 
@@ -468,7 +573,7 @@ function renderCompare(year, data, params, compare) {
       const chNameDiff = ch.name_changed
         ? `<div class="note">${esc(y1)}：${esc(cn1)} → ${esc(y2)}：${esc(cn2)}</div>`
         : "";
-      const to = href(year, "比較", { kind: ch.kind, code: ch.code });
+      const to = cmpHref(ch.kind, ch.code);
       return `<tr class="click" data-to="${esc(to)}">
         <td><a href="${esc(to)}">${esc(ch.display_name)}</a>${chStatusBadge}${chUnresolved}<div class="note">${esc(ch.level)} ${esc(ch.code)}</div>${chNameDiff}</td>
         <td class="num">${ca1 !== null ? fmt(ca1) : `僅${esc(y2)}`}</td>

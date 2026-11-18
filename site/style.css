@@ -63,6 +63,13 @@ tr.click:hover td { background: var(--accent-soft); }
 .bar { height: 6px; background: var(--accent-soft); border-radius: 3px; margin-top: 4px; min-width: 40px; }
 .bar > i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
 .note { font-size: .88rem; color: var(--muted); }
+.toc { list-style: none; margin: 8px 0 16px; padding: 0; }
+.toc li { padding: 4px 0; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.toc .filters { margin: 0; }
+.toc .chip { padding: 2px 10px; font-size: .85rem; }
+.pager { display: flex; justify-content: space-between; gap: 8px; margin: 10px 0; }
+.reftable { width: max-content; min-width: 100%; }
+.reftable tr:last-child td, .reftable td { border: 1px solid var(--line); white-space: pre-line; vertical-align: middle; }
 .hit { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; margin: 8px 0; }
 .hit .t { font-weight: 600; }
 .filters { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }

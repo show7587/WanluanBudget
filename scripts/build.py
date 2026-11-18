@@ -20,6 +20,7 @@ import argparse
 from collections import defaultdict
 import csv
 import json
+import re
 from pathlib import Path
 import sqlite3
 from typing import Any
@@ -1131,6 +1132,166 @@ def _build_compare_json(
     }
 
 
+def _remap_compare_item_codes(
+    items: dict[str, dict[str, Any]], code_map: dict[str, str]
+) -> dict[str, dict[str, Any]]:
+    """依跨年度代碼對應表，把某一年度項目的代碼改成另一年度的代碼（比較配對用）。
+
+    `code_map` 為 {本年度代碼: 要換成的代碼}（來自 data/crosswalk/codes.csv：to_code → from_code）。
+    項目鍵（kind:code）、項目本身的 code，以及所有 children_keys／parent_key 的參照都會一併改寫；
+    不在 `code_map` 內的項目原樣保留。換名後若與既有項目鍵衝突則直接報錯，不靜默覆蓋。
+    """
+    if not code_map:
+        return items
+    key_map: dict[str, str] = {}
+    for key, item in items.items():
+        new_code = code_map.get(item["code"])
+        if new_code is not None and new_code != item["code"]:
+            key_map[key] = f"{item['kind']}:{new_code}"
+    if not key_map:
+        return items
+    unchanged = set(items) - set(key_map)
+    for old_key, new_key in key_map.items():
+        if new_key in unchanged or list(key_map.values()).count(new_key) > 1:
+            raise ValueError(f"跨年度代碼對應造成項目鍵衝突：{old_key} → {new_key}")
+    remapped: dict[str, dict[str, Any]] = {}
+    for key, item in items.items():
+        new_item = dict(item)
+        if key in key_map:
+            new_item["code"] = code_map[item["code"]]
+        new_item["children_keys"] = [key_map.get(c, c) for c in item.get("children_keys", [])]
+        parent = item.get("parent_key")
+        new_item["parent_key"] = key_map.get(parent, parent) if parent else parent
+        remapped[key_map.get(key, key)] = new_item
+    return remapped
+
+
+_COMPARE_PAIR_RE = re.compile(r"compare_[0-9]+_[0-9]+\.json")
+
+
+def _write_compare_files(
+    site_path: Path,
+    years: list[int],
+    compare_items_by_year: dict[int, dict[str, dict[str, Any]]],
+    codes_rows: list[dict[str, Any]] | None = None,
+) -> None:
+    """對每一對相鄰年度輸出 compare_<a>_<b>.json；compare.json 為最後一對（向後相容）。
+
+    少於兩年時不輸出任何比較檔；同時清除殘留的 compare.json 與不再對應的 pair 檔
+    （只刪 compare.json 與符合 compare_<數字>_<數字>.json 的檔案）。
+    """
+    pairs = list(zip(years, years[1:]))
+    wanted = {f"compare_{a}_{b}.json" for a, b in pairs}
+    for path in site_path.iterdir():
+        if path.name in wanted or not path.is_file():
+            continue
+        if path.name == "compare.json" or _COMPARE_PAIR_RE.fullmatch(path.name):
+            if path.name == "compare.json" and pairs:
+                continue
+            path.unlink()
+    latest: dict[str, Any] | None = None
+    for a, b in pairs:
+        # 同一對年度若在 data/crosswalk/codes.csv 登記了代碼改編（from_year=a, to_year=b），
+        # 比較時把 b 年度的代碼換成 a 年度的代碼，使同一個項目配成一對
+        code_map = {
+            r["to_code"]: r["from_code"]
+            for r in (codes_rows or [])
+            if r["from_year"] == a and r["to_year"] == b and r["from_code"] and r["to_code"]
+        }
+        latest = _build_compare_json(
+            a, b, compare_items_by_year[a], _remap_compare_item_codes(compare_items_by_year[b], code_map)
+        )
+        _write_json_deterministic(site_path / f"compare_{a}_{b}.json", latest)
+    if latest is not None:
+        _write_json_deterministic(site_path / "compare.json", latest)
+
+
+# 參考表各表的金額單位（CSV 沒有單位欄；以 source_table 目次標題為鍵，已對照 raw/114/part3.md 頁首）。
+# 對不到的表名 unit 為 null，前端顯示「單位請見原書該頁」，不猜。
+_REFERENCE_UNITS = {
+    "各機關歲出一級用途別科目分析總表": "新臺幣千元",
+    "各機關資本支出分析總表": "新臺幣千元",
+    "歲出人事費彙計表": "新臺幣元",
+    "員工總表": "人",
+    "派員出國計畫總表": "新臺幣千元",
+    "派員出國計畫預算類別表-考察、訪問、開會、進修、研究、實習": "新臺幣千元",
+    "派員赴大陸計畫預算類別表": "新臺幣千元",
+    "公務車輛明細表": "新臺幣元",
+    "補助及捐助經費總表": "新臺幣千元",
+    "歲出按職能及經濟性綜合分類表": "新臺幣千元",
+}
+
+_REFERENCE_FILE_RE = re.compile(r"reference_[0-9]+\.json")
+
+
+def _reference_num(text: str) -> int | float | None:
+    if text == "":
+        return None
+    v = float(text)
+    return int(v) if v.is_integer() else v
+
+
+# 表層級的資料品質提示（顯示在參考表頁）。只放「對照原件影像後確認」的問題；問題修好後要移除。
+_REFERENCE_NOTES = {
+    "公務車輛明細表": (
+        "本表（p165–p168）部分儲存格因轉檔有黏連，例如 p165 的車輛數「243」其實是 24 與 3"
+        "（原書分在兩列，轉檔時併成一列），金額也可能錯位；p166、p168 尚未逐格對照原書，請以原書為準。"
+    ),
+}
+
+
+def _build_reference_json(year: int, rows: list[dict[str, str]]) -> dict[str, Any]:
+    """把通用長格式 reference_tables.csv 轉成依表分組的 JSON；文字逐字保留。"""
+    grouped: dict[tuple[int, int], list[dict[str, str]]] = {}
+    for row in rows:
+        grouped.setdefault((int(row["page"]), int(row["table_seq"])), []).append(row)
+    tables: list[dict[str, Any]] = []
+    for (page, seq), trows in sorted(grouped.items()):
+        cells = [
+            {
+                "r": int(r["row_idx"]),
+                "c": int(r["col_idx"]),
+                "rs": int(r["rowspan"]),
+                "cs": int(r["colspan"]),
+                "t": r["text"],
+                "v": _reference_num(r["value_num"]),
+            }
+            for r in trows
+        ]
+        cells.sort(key=lambda x: (x["r"], x["c"]))
+        source_table = trows[0]["source_table"]
+        table: dict[str, Any] = {
+            "page": page,
+            "table_seq": seq,
+            "source_table": source_table,
+            "unit": _REFERENCE_UNITS.get(source_table),
+        }
+        note = _REFERENCE_NOTES.get(source_table)
+        if note:
+            table["note"] = note
+        table["rows"] = max(c["r"] + c["rs"] for c in cells)
+        table["cols"] = max(c["c"] + c["cs"] for c in cells)
+        table["cells"] = cells
+        tables.append(table)
+    return {"year": year, "tables": tables}
+
+
+def _write_reference_files(site_path: Path, years: list[int], data_path: Path) -> list[int]:
+    """有 data/<年度>/reference_tables.csv 的年度輸出 reference_<年度>.json，回傳這些年度。
+
+    同時清除不再對應的殘留檔（只刪完全符合 reference_<數字>.json 的檔案）。
+    """
+    ref_years = [y for y in years if (data_path / str(y) / "reference_tables.csv").is_file()]
+    wanted = {f"reference_{y}.json" for y in ref_years}
+    for path in site_path.iterdir():
+        if path.is_file() and path.name not in wanted and _REFERENCE_FILE_RE.fullmatch(path.name):
+            path.unlink()
+    for y in ref_years:
+        rows = _read_csv(data_path / str(y) / "reference_tables.csv")
+        _write_json_deterministic(site_path / f"reference_{y}.json", _build_reference_json(y, rows))
+    return ref_years
+
+
 def build(
     data_dir: Path | str = ROOT_DIR / "data",
     out_dir: Path | str = ROOT_DIR / "build",
@@ -1348,19 +1509,12 @@ def build(
             "items": items_rows,
             "items_candidates": candidates_rows,
         },
+        "reference_years": _write_reference_files(site_path, years, data_path),
     }
     _write_json_deterministic(site_path / "index.json", index_json)
     _write_json_deterministic(site_path / "search.json", all_search_docs)
 
-    compare_path = site_path / "compare.json"
-    if len(years) >= 2:
-        y1, y2 = years[-2], years[-1]
-        compare_json = _build_compare_json(
-            y1, y2, compare_items_by_year[y1], compare_items_by_year[y2]
-        )
-        _write_json_deterministic(compare_path, compare_json)
-    elif compare_path.exists():
-        compare_path.unlink()
+    _write_compare_files(site_path, years, compare_items_by_year, codes_rows)
 
     return {
         "sqlite_path": sqlite_path,

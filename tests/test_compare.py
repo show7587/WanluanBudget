@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from scripts.build import ROOT_DIR, build
+from scripts.build import ROOT_DIR, _remap_compare_item_codes, build
 
 
 def _sha256(path: Path) -> str:
@@ -247,6 +247,173 @@ class TestCompare(unittest.TestCase):
             self.assertEqual(
                 _sha256(site_dir / "compare.json"),
                 _sha256(self.compare_path),
+            )
+
+
+class TestComparePairs(unittest.TestCase):
+    """相鄰年度 compare_<a>_<b>.json 的產出、向後相容、決定性與清除（只用暫存目錄）。"""
+
+    def _build(self, tmp: str, years: list[int], site_name: str = "site_data") -> Path:
+        t_path = Path(tmp)
+        data_dir = t_path / "data"
+        for y in years:
+            shutil.copytree(ROOT_DIR / "data" / str(y), data_dir / str(y))
+        shutil.copy2(ROOT_DIR / "data" / "corrections.csv", data_dir / "corrections.csv")
+        site = t_path / site_name
+        build(data_dir=data_dir, out_dir=t_path / "build", site_dir=site)
+        return site
+
+    @staticmethod
+    def _compare_files(site: Path) -> list[str]:
+        return sorted(p.name for p in site.glob("compare*.json"))
+
+    def test_three_years_produce_two_pairs_and_latest_compare(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            site = self._build(tmp, [114, 115, 116])
+            self.assertEqual(
+                self._compare_files(site),
+                ["compare.json", "compare_114_115.json", "compare_115_116.json"],
+            )
+            self.assertEqual(
+                (site / "compare.json").read_bytes(),
+                (site / "compare_115_116.json").read_bytes(),
+            )
+            c = json.loads((site / "compare_114_115.json").read_text(encoding="utf-8"))
+            self.assertEqual(c["years"], [114, 115])
+            self.assertEqual(c["from_year"], 114)
+            self.assertEqual(c["to_year"], 115)
+
+    def test_two_years_produce_compare_and_one_pair(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            site = self._build(tmp, [115, 116])
+            self.assertEqual(
+                self._compare_files(site), ["compare.json", "compare_115_116.json"]
+            )
+            self.assertEqual(
+                (site / "compare.json").read_bytes(),
+                (site / "compare_115_116.json").read_bytes(),
+            )
+
+    def test_single_year_removes_all_compare_files_but_keeps_others(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            t_path = Path(tmp)
+            site = t_path / "site_data"
+            site.mkdir()
+            (site / "compare.json").write_text("{}\n", encoding="utf-8")
+            (site / "compare_114_115.json").write_text("{}\n", encoding="utf-8")
+            (site / "compare_115_116.json").write_text("{}\n", encoding="utf-8")
+            keep = ["compare_notes.json", "compare_a_b.json", "compare_114_115.txt",
+                    "compare_115_116.json.bak", "other.json"]
+            for name in keep:
+                (site / name).write_text("keep\n", encoding="utf-8")
+            (site / "compare_999_1000.json.d").mkdir()
+            data_dir = t_path / "data"
+            shutil.copytree(ROOT_DIR / "data" / "116", data_dir / "116")
+            shutil.copy2(ROOT_DIR / "data" / "corrections.csv", data_dir / "corrections.csv")
+            res = build(data_dir=data_dir, out_dir=t_path / "build", site_dir=site)
+            self.assertEqual(res["years"], [116])
+            self.assertEqual(self._compare_files(site), sorted(
+                n for n in keep if n.startswith("compare") and n.endswith(".json")
+            ))
+            for name in keep:
+                self.assertTrue((site / name).exists(), name)
+            self.assertTrue((site / "compare_999_1000.json.d").is_dir())
+
+    def test_stale_pair_files_removed_when_years_shrink(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            t_path = Path(tmp)
+            site = t_path / "site_data"
+            site.mkdir()
+            (site / "compare_114_115.json").write_text("{}\n", encoding="utf-8")
+            data_dir = t_path / "data"
+            for y in (115, 116):
+                shutil.copytree(ROOT_DIR / "data" / str(y), data_dir / str(y))
+            shutil.copy2(ROOT_DIR / "data" / "corrections.csv", data_dir / "corrections.csv")
+            build(data_dir=data_dir, out_dir=t_path / "build", site_dir=site)
+            self.assertEqual(
+                self._compare_files(site), ["compare.json", "compare_115_116.json"]
+            )
+
+    def test_pair_outputs_are_deterministic(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp1, tempfile.TemporaryDirectory() as tmp2:
+            s1 = self._build(tmp1, [114, 115, 116])
+            s2 = self._build(tmp2, [114, 115, 116])
+            for name in ("compare.json", "compare_114_115.json", "compare_115_116.json"):
+                self.assertEqual(_sha256(s1 / name), _sha256(s2 / name), name)
+
+
+class TestCompareCodeCrosswalk(unittest.TestCase):
+    """跨年度代碼對應（data/crosswalk/codes.csv）：改編過的項目在比較時要配成同一對。"""
+
+    @staticmethod
+    def _items() -> dict[str, dict]:
+        return {
+            "revenue:04": {
+                "kind": "revenue", "code": "04", "children_keys": ["revenue:04-01", "revenue:04-02"],
+                "parent_key": None,
+            },
+            "revenue:04-01": {
+                "kind": "revenue", "code": "04-01", "children_keys": [], "parent_key": "revenue:04",
+            },
+            "revenue:04-02": {
+                "kind": "revenue", "code": "04-02", "children_keys": ["revenue:07120010500"],
+                "parent_key": "revenue:04",
+            },
+            "revenue:07120010500": {
+                "kind": "revenue", "code": "07120010500", "children_keys": [],
+                "parent_key": "revenue:04-02",
+            },
+        }
+
+    def test_remap_rewrites_key_code_children_and_parent(self) -> None:
+        items = self._items()
+        out = _remap_compare_item_codes(items, {"04-02": "04-03"})
+        self.assertIn("revenue:04-03", out)
+        self.assertNotIn("revenue:04-02", out)
+        self.assertEqual(out["revenue:04-03"]["code"], "04-03")
+        self.assertEqual(out["revenue:04"]["children_keys"], ["revenue:04-01", "revenue:04-03"])
+        self.assertEqual(out["revenue:07120010500"]["parent_key"], "revenue:04-03")
+        # 原輸入不被修改；不在對應表內的項目原樣保留
+        self.assertIn("revenue:04-02", items)
+        self.assertEqual(items["revenue:04"]["children_keys"], ["revenue:04-01", "revenue:04-02"])
+        self.assertEqual(out["revenue:04-01"], items["revenue:04-01"])
+
+    def test_remap_empty_map_returns_input_unchanged(self) -> None:
+        items = self._items()
+        self.assertIs(_remap_compare_item_codes(items, {}), items)
+        self.assertIs(_remap_compare_item_codes(items, {"99-99": "98-98"}), items)
+
+    def test_remap_collision_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            _remap_compare_item_codes(self._items(), {"04-02": "04-01"})
+
+    def test_real_data_aligns_waste_material_sales_between_114_and_115(self) -> None:
+        """114 的項 04-03 與 115 的項 04-02 同為廢舊物資售價；115→116 的比較不受影響。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            t_path = Path(tmp)
+            data_dir = t_path / "data"
+            for y in (114, 115, 116):
+                shutil.copytree(ROOT_DIR / "data" / str(y), data_dir / str(y),
+                                ignore=shutil.ignore_patterns("*.pdf"))
+            shutil.copy2(ROOT_DIR / "data" / "corrections.csv", data_dir / "corrections.csv")
+            shutil.copytree(ROOT_DIR / "data" / "crosswalk", data_dir / "crosswalk")
+            site = t_path / "site_data"
+            build(data_dir=data_dir, out_dir=t_path / "build", site_dir=site)
+
+            entries = json.loads((site / "compare_114_115.json").read_text(encoding="utf-8"))["entries"]
+            waste = entries["revenue:04-03"]
+            self.assertEqual(waste["status"], "both")
+            self.assertEqual(waste["amount_元"], {"114": 20000, "115": 120000})
+            self.assertFalse(waste["name_changed"])
+            self.assertEqual(entries["revenue:04-02"]["status"], "only_114")
+            self.assertEqual(entries["revenue:04-02"]["name"]["114"], "財產售價")
+            self.assertEqual(entries["revenue:07120010500"]["parent_key"], "revenue:04-03")
+            self.assertEqual(entries["revenue:04"]["children"],
+                             ["revenue:04-01", "revenue:04-02", "revenue:04-03"])
+            # 沒有登記對應的年度對（115→116）不受影響
+            self.assertEqual(
+                _sha256(site / "compare_115_116.json"),
+                _sha256(ROOT_DIR / "site" / "data" / "compare_115_116.json"),
             )
 
 

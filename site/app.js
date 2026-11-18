@@ -40,14 +40,35 @@ async function loadJson(path) {
   return cache[path];
 }
 
-let comparePromise = null;
-async function getCompare() {
-  if (!comparePromise) {
-    comparePromise = fetch("data/compare.json")
+// 比較資料依相鄰年度對（如 "114-115"）取得；404 或失敗視為沒有比較。
+const comparePromises = {};
+async function getCompare(pair) {
+  if (!pair) return null;
+  if (!comparePromises[pair]) {
+    comparePromises[pair] = fetch(`data/compare_${pair.replace("-", "_")}.json`)
       .then((r) => (r.ok ? r.json() : null))
       .catch(() => null);
   }
-  return comparePromise;
+  return comparePromises[pair];
+}
+
+// 相鄰年度對：由 index.years 推出，如 ["114-115", "115-116"]
+function adjacentPairs(index) {
+  const ys = index.years.map(Number).sort((a, b) => a - b);
+  return ys.slice(1).map((y, i) => `${ys[i]}-${y}`);
+}
+
+// 年度 Y 預設的比較對：(Y, Y+1) 若存在，否則 (Y-1, Y)；都沒有則 null
+function defaultPair(index, year) {
+  const y = Number(year), pairs = adjacentPairs(index);
+  return pairs.find((p) => p.startsWith(`${y}-`)) || pairs.find((p) => p.endsWith(`-${y}`)) || null;
+}
+
+// 比較頁可用 pair=a-b 指定比較對；無效或缺少時用預設規則
+function pickPair(index, year, params) {
+  const want = params && params.get("pair");
+  if (want && adjacentPairs(index).includes(want)) return want;
+  return defaultPair(index, year);
 }
 
 function hasCompareEntry(compare, kind, code) {
@@ -94,14 +115,15 @@ async function render() {
       $app.innerHTML = `<p class="warn">找不到年度 ${esc(year)}。</p>`;
       return;
     }
+    const pair = pickPair(index, year, r.view === "比較" ? r.params : null);
     const [data, compare] = await Promise.all([
       loadJson(`data/${year}.json`),
-      getCompare(),
+      getCompare(pair),
     ]);
     setNav(r.view, year, index);
     if (r.view === "歲入" || r.view === "歲出") renderDrill(year, r.view, data, r.params, compare);
     else if (r.view === "搜尋") await renderSearch(year, data, r.params, compare);
-    else if (r.view === "比較") renderCompare(year, data, r.params, compare);
+    else if (r.view === "比較") renderCompare(year, data, r.params, compare, pair, defaultPair(index, year));
     else renderOverview(year, data);
     window.scrollTo(0, 0);
   } catch (e) {
@@ -116,7 +138,7 @@ $yearSel.addEventListener("change", () => {
   const view = r.view || "總覽";
   let params = {};
   if (view === "搜尋" && r.params.get("q")) params = { q: r.params.get("q") };
-  else if (view === "比較") params = Object.fromEntries(r.params.entries());
+  else if (view === "比較") { params = Object.fromEntries(r.params.entries()); delete params.pair; } // pair 依新年度重新決定
   location.hash = href($yearSel.value, view, params);
 });
 
@@ -363,11 +385,13 @@ async function renderSearch(year, data, params, compare) {
 }
 
 // ---------- 跨年度比較 ----------
-function renderCompare(year, data, params, compare) {
+function renderCompare(year, data, params, compare, pair, defPair) {
+  // 只有指定了非預設比較對時才把 pair 帶進連結，預設情況網址維持原樣
+  const cmpHref = (kind, code) => href(year, "比較", pair && pair !== defPair ? { kind, code, pair } : { kind, code });
   const kind = (params.get("kind") || "").trim();
   const code = (params.get("code") || "").trim();
   if (!compare || !compare.entries) {
-    $app.innerHTML = `<p class="warn">比較功能不可用（找不到 compare.json）。</p>`;
+    $app.innerHTML = `<p class="warn">比較功能不可用（找不到比較資料）。</p>`;
     return;
   }
   const key = `${kind}:${code}`;
@@ -394,7 +418,7 @@ function renderCompare(year, data, params, compare) {
     if (idx === chain.length - 1) {
       crumbs.push(`<strong>${esc(label)}（比較）</strong>`);
     } else {
-      crumbs.push(`<a href="${esc(href(year, "比較", { kind: item.kind, code: item.code }))}">${esc(label)}</a>`);
+      crumbs.push(`<a href="${esc(cmpHref(item.kind, item.code))}">${esc(label)}</a>`);
     }
   });
 
@@ -468,7 +492,7 @@ function renderCompare(year, data, params, compare) {
       const chNameDiff = ch.name_changed
         ? `<div class="note">${esc(y1)}：${esc(cn1)} → ${esc(y2)}：${esc(cn2)}</div>`
         : "";
-      const to = href(year, "比較", { kind: ch.kind, code: ch.code });
+      const to = cmpHref(ch.kind, ch.code);
       return `<tr class="click" data-to="${esc(to)}">
         <td><a href="${esc(to)}">${esc(ch.display_name)}</a>${chStatusBadge}${chUnresolved}<div class="note">${esc(ch.level)} ${esc(ch.code)}</div>${chNameDiff}</td>
         <td class="num">${ca1 !== null ? fmt(ca1) : `僅${esc(y2)}`}</td>

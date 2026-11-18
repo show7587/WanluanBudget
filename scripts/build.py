@@ -875,6 +875,262 @@ def _write_json_deterministic(path: Path, data: Any) -> None:
     path.write_text(content, encoding="utf-8")
 
 
+def _collect_year_compare_items(
+    year: int,
+    revenue_rows: list[dict[str, Any]],
+    year_json: dict[str, Any],
+    known_diffs: dict[tuple[int, str], dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """擷取單一年度可供跨年度比較的項目（revenue 各層與所有細目、plan、object）。"""
+    items: dict[str, dict[str, Any]] = {}
+    hierarchy_fine_codes: set[str] = set()
+
+    def walk_rev(nodes: list[dict[str, Any]], parent_key: str | None = None) -> None:
+        for n in nodes:
+            lvl = n["level"]
+            code = n["code"]
+            key = f"revenue:{code}"
+            if lvl == "細目":
+                hierarchy_fine_codes.add(code)
+                continue
+            ch_keys = [f"revenue:{ch['code']}" for ch in n.get("children", [])]
+            items[key] = {
+                "kind": "revenue",
+                "level": lvl,
+                "code": code,
+                "name": n["name"],
+                "amount_元": n["amount_元"],
+                "page": n["page"],
+                "page_start": n.get("page_start", n["page"]),
+                "page_end": n.get("page_end", n["page"]),
+                "unresolved": bool(n.get("unresolved", False)),
+                "in_hierarchy": True,
+                "children_keys": ch_keys,
+                "parent_key": parent_key,
+                "dept": n.get("dept", ""),
+            }
+            walk_rev(n.get("children", []), key)
+
+    walk_rev(year_json["revenue"]["hierarchy"], None)
+
+    # 細目取自 revenue_items.csv 的所有 code
+    rev_by_code: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    rev_code_order: list[str] = []
+    for r in revenue_rows:
+        c = r["code"]
+        if c not in rev_by_code:
+            rev_code_order.append(c)
+        rev_by_code[c].append(r)
+
+    # 記錄細目在 hierarchy 中的 parent_key
+    fine_parent_by_code: dict[str, str] = {}
+    for kuan in year_json["revenue"]["hierarchy"]:
+        for hsiang in kuan.get("children", []):
+            for sub in hsiang.get("children", []):
+                sub_key = f"revenue:{sub['code']}"
+                for fine in sub.get("children", []):
+                    fine_parent_by_code[fine["code"]] = sub_key
+
+    for c in rev_code_order:
+        r_list = rev_by_code[c]
+        first = r_list[0]
+        detail_sum = sum(it["amount_元"] for it in r_list)
+        kd = known_diffs.get((year, c))
+        diff_yuan = kd["diff_元"] if kd else 0
+        header_amount = detail_sum - diff_yuan
+        p_start = min(it["page"] for it in r_list)
+        p_end = max(it["page"] for it in r_list)
+        key = f"revenue:{c}"
+        items[key] = {
+            "kind": "revenue",
+            "level": "細目",
+            "code": c,
+            "name": first["name"],
+            "amount_元": header_amount,
+            "page": p_start,
+            "page_start": p_start,
+            "page_end": p_end,
+            "unresolved": bool(kd),
+            "in_hierarchy": c in hierarchy_fine_codes,
+            "children_keys": [],
+            "parent_key": fine_parent_by_code.get(c),
+            "dept": first.get("dept", ""),
+        }
+
+    # 歲出：工作計畫 (plan) 與 用途別 (object)
+    for func_node in year_json["expenditure"]["hierarchy"]:
+        func_name = func_node["name"]
+        for dept_node in func_node.get("children", []):
+            dept_name = dept_node["name"]
+            for plan_node in dept_node.get("children", []):
+                p_code = plan_node["code"]
+                plan_key = f"plan:{p_code}"
+                use_nodes = plan_node.get("children", [])
+                ch_keys = [f"object:{p_code}|{u['code']}" for u in use_nodes]
+                items[plan_key] = {
+                    "kind": "plan",
+                    "level": "工作計畫",
+                    "code": p_code,
+                    "name": plan_node["name"],
+                    "amount_元": plan_node["amount_元"],
+                    "page": plan_node["page"],
+                    "page_start": plan_node.get("page_start", plan_node["page"]),
+                    "page_end": plan_node.get("page_end", plan_node["page"]),
+                    "unresolved": bool(plan_node.get("unresolved", False)),
+                    "in_hierarchy": True,
+                    "children_keys": ch_keys,
+                    "parent_key": None,
+                    "dept": dept_name,
+                    "政事別": func_name,
+                }
+                for u in use_nodes:
+                    u_code = u["code"]
+                    obj_code = f"{p_code}|{u_code}"
+                    obj_key = f"object:{obj_code}"
+                    items[obj_key] = {
+                        "kind": "object",
+                        "level": "用途別",
+                        "code": obj_code,
+                        "plan_code": p_code,
+                        "用途別_code": u_code,
+                        "name": u["name"],
+                        "plan_name": plan_node["name"],
+                        "amount_元": u["amount_元"],
+                        "page": u["page"],
+                        "page_start": u.get("page_start", u["page"]),
+                        "page_end": u.get("page_end", u["page"]),
+                        "unresolved": bool(u.get("unresolved", False)),
+                        "in_hierarchy": True,
+                        "children_keys": [],
+                        "parent_key": plan_key,
+                        "dept": dept_name,
+                        "政事別": func_name,
+                    }
+
+    return items
+
+
+def _build_compare_json(
+    y1: int,
+    y2: int,
+    items1: dict[str, dict[str, Any]],
+    items2: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """合併兩年度項目並建立 compare.json 結構。"""
+    s1, s2 = str(y1), str(y2)
+    kind_order = {"revenue": 0, "plan": 1, "object": 2}
+    rev_level_order = {"款": 0, "項": 1, "子目": 2, "細目": 3}
+
+    all_keys = sorted(
+        set(items1.keys()) | set(items2.keys()),
+        key=lambda k: (
+            kind_order.get((items2.get(k) or items1[k])["kind"], 9),
+            rev_level_order.get((items2.get(k) or items1[k])["level"], 9),
+            (items2.get(k) or items1[k])["code"],
+        ),
+    )
+
+    entries: dict[str, dict[str, Any]] = {}
+    for key in all_keys:
+        n1 = items1.get(key)
+        n2 = items2.get(key)
+        ref = n2 or n1
+        assert ref is not None
+
+        kind = ref["kind"]
+        level = ref["level"]
+        code = ref["code"]
+
+        if n1 is not None and n2 is not None:
+            status = "both"
+        elif n1 is not None:
+            status = f"only_{s1}"
+        else:
+            status = f"only_{s2}"
+
+        name1 = n1["name"] if n1 is not None else None
+        name2 = n2["name"] if n2 is not None else None
+        name_changed = bool(n1 is not None and n2 is not None and name1 != name2)
+
+        a1 = n1["amount_元"] if n1 is not None else None
+        a2 = n2["amount_元"] if n2 is not None else None
+        diff_yuan = (a2 if a2 is not None else 0) - (a1 if a1 is not None else 0)
+
+        if a1 is not None and a2 is not None and a1 == 0 and a2 == 0:
+            pct: float | int | None = 0
+        elif a1 is None or a1 == 0:
+            pct = None
+        else:
+            pct = round((diff_yuan / a1) * 100, 2)
+
+        p1 = (
+            {
+                "page": n1["page"],
+                "page_start": n1["page_start"],
+                "page_end": n1["page_end"],
+            }
+            if n1 is not None
+            else None
+        )
+        p2 = (
+            {
+                "page": n2["page"],
+                "page_start": n2["page_start"],
+                "page_end": n2["page_end"],
+            }
+            if n2 is not None
+            else None
+        )
+
+        ch1 = n1["children_keys"] if n1 is not None else []
+        ch2 = n2["children_keys"] if n2 is not None else []
+        merged_children = sorted(
+            set(ch1) | set(ch2),
+            key=lambda ck: ck.split(":", 1)[1] if ":" in ck else ck,
+        )
+
+        unresolved = bool(
+            (n1 and n1["unresolved"]) or (n2 and n2["unresolved"])
+        )
+        in_hierarchy = bool(
+            (n1 and n1["in_hierarchy"]) or (n2 and n2["in_hierarchy"])
+        )
+        parent_key = (n2.get("parent_key") if n2 else None) or (
+            n1.get("parent_key") if n1 else None
+        )
+        dept = (n2.get("dept") if n2 else None) or (
+            n1.get("dept") if n1 else ""
+        ) or ""
+
+        entry: dict[str, Any] = {
+            "key": key,
+            "kind": kind,
+            "level": level,
+            "code": code,
+            "name": {s1: name1, s2: name2},
+            "display_name": name2 if name2 is not None else name1,
+            "amount_元": {s1: a1, s2: a2},
+            "diff_元": diff_yuan,
+            "pct": pct,
+            "page": {s1: p1, s2: p2},
+            "status": status,
+            "name_changed": name_changed,
+            "unresolved": unresolved,
+            "in_hierarchy": in_hierarchy,
+            "children": merged_children,
+            "parent_key": parent_key,
+            "dept": dept,
+        }
+        entries[key] = entry
+
+    return {
+        "years": [y1, y2],
+        "from_year": y1,
+        "to_year": y2,
+        "entries": entries,
+    }
+
+
 def build(
     data_dir: Path | str = ROOT_DIR / "data",
     out_dir: Path | str = ROOT_DIR / "build",
@@ -899,6 +1155,7 @@ def build(
 
     all_search_docs: list[dict[str, Any]] = []
     year_summaries: list[dict[str, Any]] = []
+    compare_items_by_year: dict[int, dict[str, dict[str, Any]]] = {}
 
     conn = sqlite3.connect(str(sqlite_path))
     try:
@@ -913,6 +1170,9 @@ def build(
                 year_json,
                 search_docs,
             ) = _build_year_data(y, data_path / str(y), known_diffs)
+            compare_items_by_year[y] = _collect_year_compare_items(
+                y, revenue_rows, year_json, known_diffs
+            )
 
             conn.executemany(
                 """
@@ -1091,6 +1351,16 @@ def build(
     }
     _write_json_deterministic(site_path / "index.json", index_json)
     _write_json_deterministic(site_path / "search.json", all_search_docs)
+
+    compare_path = site_path / "compare.json"
+    if len(years) >= 2:
+        y1, y2 = years[-2], years[-1]
+        compare_json = _build_compare_json(
+            y1, y2, compare_items_by_year[y1], compare_items_by_year[y2]
+        )
+        _write_json_deterministic(compare_path, compare_json)
+    elif compare_path.exists():
+        compare_path.unlink()
 
     return {
         "sqlite_path": sqlite_path,

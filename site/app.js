@@ -40,6 +40,41 @@ async function loadJson(path) {
   return cache[path];
 }
 
+let comparePromise = null;
+async function getCompare() {
+  if (!comparePromise) {
+    comparePromise = fetch("data/compare.json")
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null);
+  }
+  return comparePromise;
+}
+
+function hasCompareEntry(compare, kind, code) {
+  if (!compare || !compare.entries || !kind || !code) return false;
+  return Boolean(compare.entries[`${kind}:${code}`]);
+}
+
+function compareBtn(year, compare, kind, code) {
+  if (!hasCompareEntry(compare, kind, code)) return "";
+  const url = href(year, "比較", { kind, code });
+  return ` <a class="btn btn-sm" href="${esc(url)}">比較</a>`;
+}
+
+const fmtDiff = (n) => {
+  if (n === null || n === undefined || n === "") return "—";
+  const v = Number(n);
+  return (v > 0 ? "+" : "") + fmt(v);
+};
+
+const fmtPct = (entry, y1, y2) => {
+  if (entry.status === `only_${y1}`) return `僅${y1}`;
+  if (entry.status === `only_${y2}`) return `僅${y2}`;
+  if (entry.pct === null || entry.pct === undefined) return "—";
+  const v = Number(entry.pct);
+  return `${v > 0 ? "+" : ""}${v.toFixed(2)}%`;
+};
+
 // ---------- 路由 ----------
 function parseHash() {
   const raw = location.hash.replace(/^#\/?/, "");
@@ -59,10 +94,14 @@ async function render() {
       $app.innerHTML = `<p class="warn">找不到年度 ${esc(year)}。</p>`;
       return;
     }
-    const data = await loadJson(`data/${year}.json`);
+    const [data, compare] = await Promise.all([
+      loadJson(`data/${year}.json`),
+      getCompare(),
+    ]);
     setNav(r.view, year, index);
-    if (r.view === "歲入" || r.view === "歲出") renderDrill(year, r.view, data, r.params);
-    else if (r.view === "搜尋") await renderSearch(year, data, r.params);
+    if (r.view === "歲入" || r.view === "歲出") renderDrill(year, r.view, data, r.params, compare);
+    else if (r.view === "搜尋") await renderSearch(year, data, r.params, compare);
+    else if (r.view === "比較") renderCompare(year, data, r.params, compare);
     else renderOverview(year, data);
     window.scrollTo(0, 0);
   } catch (e) {
@@ -72,10 +111,12 @@ async function render() {
 
 const $yearSel = document.getElementById("yearSel");
 $yearSel.addEventListener("change", () => {
-  // 換年度：保留目前的畫面（總覽／歲出／歲入／搜尋）；搜尋保留關鍵字，其餘層級篩選因各年度編號不同而捨棄
+  // 換年度：保留目前的畫面（總覽／歲出／歲入／搜尋／比較）；搜尋保留關鍵字，比較保留 kind 與 code
   const r = parseHash();
   const view = r.view || "總覽";
-  const params = view === "搜尋" && r.params.get("q") ? { q: r.params.get("q") } : {};
+  let params = {};
+  if (view === "搜尋" && r.params.get("q")) params = { q: r.params.get("q") };
+  else if (view === "比較") params = Object.fromEntries(r.params.entries());
   location.hash = href($yearSel.value, view, params);
 });
 
@@ -176,7 +217,17 @@ function walkPath(nodes, levels, params) {
   return { path };
 }
 
-function renderDrill(year, view, data, params) {
+function getDrillCompareTarget(view, node) {
+  if (!node) return { kind: null, code: null };
+  if (view === "歲入") return { kind: "revenue", code: node.code };
+  if (view === "歲出") {
+    if (node.level === "工作計畫") return { kind: "plan", code: node.code };
+    if (node.level === "用途別") return { kind: "object", code: `${node.plan_code}|${node.code}` };
+  }
+  return { kind: null, code: null };
+}
+
+function renderDrill(year, view, data, params, compare) {
   const sec = SECTIONS[view];
   const root = data[sec.key];
   const { path, missing } = walkPath(root.hierarchy, sec.levels, params);
@@ -194,8 +245,10 @@ function renderDrill(year, view, data, params) {
   const note = cur && cur.unresolved
     ? `<div class="warn"><strong>未解決</strong>：${esc(cur.note || cur.unresolved_note || "此項資料待核對")}</div>`
     : "";
+  const cmpTarget = getDrillCompareTarget(view, cur);
+  const cmpBtn = compareBtn(year, compare, cmpTarget.kind, cmpTarget.code);
   const head = cur
-    ? `<h1>${esc(cur.name)} <span class="muted">${esc(cur.level)}${cur.code ? " " + esc(cur.code) : ""}</span></h1>
+    ? `<h1>${esc(cur.name)} <span class="muted">${esc(cur.level)}${cur.code ? " " + esc(cur.code) : ""}</span>${cmpBtn}</h1>
        <p>預算 <strong>${fmt(cur.amount_元)}</strong> 元　${esc(pageText(cur))}${cur.dept ? "　承辦：" + esc(cur.dept) : ""}</p>`
     : `<h1>${esc(year)} 年度${esc(view)}　<span class="muted">${fmt(root.total_元)} 元</span></h1>`;
   $app.innerHTML = `<div class="crumbs">${crumbs.join('<span class="sep">›</span>')}</div>${missing ? `<p class="warn">找不到：${esc(missing)}</p>` : ""}${head}${note}${body}`;
@@ -269,7 +322,17 @@ function findPath(nodes, levels, targetCode, trail = {}) {
   return null;
 }
 
-async function renderSearch(year, data, params) {
+function getSearchCompareTarget(hit) {
+  if (!hit) return { kind: null, code: null };
+  if (hit.kind === "revenue") return { kind: "revenue", code: hit.code };
+  if (hit.kind === "plan") return { kind: "plan", code: hit.code };
+  if (hit.kind === "expenditure" && hit.code && hit["用途別_code"]) {
+    return { kind: "object", code: `${hit.code}|${hit["用途別_code"]}` };
+  }
+  return { kind: null, code: null };
+}
+
+async function renderSearch(year, data, params, compare) {
   const q = (params.get("q") || "").trim();
   const kind = params.get("kind") || "";
   document.getElementById("q").value = q;
@@ -290,11 +353,177 @@ async function renderSearch(year, data, params) {
       const p = findPath(data.expenditure.hierarchy, EXP_LEVELS, h.code);
       if (p) { if (h.kind === "expenditure" && h["用途別_code"]) p["用途別"] = h["用途別_code"]; link = href(year, "歲出", p); }
     }
+    const cmpTarget = getSearchCompareTarget(h);
+    const cmpBtn = compareBtn(year, compare, cmpTarget.kind, cmpTarget.code);
     const title = esc(h.name);
-    return `<div class="hit"><div class="t">${link ? `<a href="${esc(link)}">${title}</a>` : title} <span class="muted">${esc(kinds[h.kind] || h.kind)} ${esc(h.code)}</span>${h.unresolved ? ' <span class="badge">⚠ 未解決</span>' : ""}</div>
+    return `<div class="hit"><div class="t">${link ? `<a href="${esc(link)}">${title}</a>` : title} <span class="muted">${esc(kinds[h.kind] || h.kind)} ${esc(h.code)}</span>${h.unresolved ? ' <span class="badge">⚠ 未解決</span>' : ""}${cmpBtn}</div>
       <div class="note">${esc((h.text || "").slice(0, 140))}</div><div>${fmt(h.amount_元)} 元　${esc(pageText(h))}${h.dept ? "　" + esc(h.dept) : ""}</div></div>`;
   });
   $app.innerHTML = `<h1>搜尋：${esc(q)}</h1><div class="filters">${chips.join("")}</div>${list.join("") || '<p class="muted">沒有符合的結果。</p>'}${shown.length > 100 ? `<p class="note">只顯示前 100 筆，共 ${shown.length} 筆，請加上更多關鍵字。</p>` : ""}`;
+}
+
+// ---------- 跨年度比較 ----------
+function renderCompare(year, data, params, compare) {
+  const kind = (params.get("kind") || "").trim();
+  const code = (params.get("code") || "").trim();
+  if (!compare || !compare.entries) {
+    $app.innerHTML = `<p class="warn">比較功能不可用（找不到 compare.json）。</p>`;
+    return;
+  }
+  const key = `${kind}:${code}`;
+  const entry = compare.entries[key];
+  if (!entry) {
+    $app.innerHTML = `<p class="warn">找不到比較項目：${esc(kind)} ${esc(code)}</p>`;
+    return;
+  }
+
+  const y1 = String(compare.from_year ?? compare.years[0]);
+  const y2 = String(compare.to_year ?? compare.years[1]);
+  const section = entry.kind === "revenue" ? "歲入" : "歲出";
+
+  // 麵包屑：回分類頁 + 父層比較鏈
+  const chain = [];
+  let cur = entry;
+  while (cur) {
+    chain.unshift(cur);
+    cur = cur.parent_key ? compare.entries[cur.parent_key] : null;
+  }
+  const crumbs = [`<a href="${href(year, section, {})}">${esc(section)}</a>`];
+  chain.forEach((item, idx) => {
+    const label = `${item.display_name || item.code}`;
+    if (idx === chain.length - 1) {
+      crumbs.push(`<strong>${esc(label)}（比較）</strong>`);
+    } else {
+      crumbs.push(`<a href="${esc(href(year, "比較", { kind: item.kind, code: item.code }))}">${esc(label)}</a>`);
+    }
+  });
+
+  // 若目前導覽年度有此項目且在階層內，提供返回該年度下鑽頁的連結
+  let drillLink = "";
+  if (entry.in_hierarchy) {
+    if (entry.kind === "revenue") {
+      const p = findPath(data.revenue.hierarchy, REV_LEVELS, entry.code);
+      if (p) drillLink = href(year, "歲入", p);
+    } else if (entry.kind === "plan") {
+      const p = findPath(data.expenditure.hierarchy, EXP_LEVELS, entry.code);
+      if (p) drillLink = href(year, "歲出", p);
+    } else if (entry.kind === "object") {
+      const [pCode, uCode] = entry.code.split("|");
+      const p = findPath(data.expenditure.hierarchy, EXP_LEVELS, pCode);
+      if (p && uCode) {
+        p["用途別"] = uCode;
+        drillLink = href(year, "歲出", p);
+      }
+    }
+  }
+
+  const a1 = entry.amount_元?.[y1] ?? null;
+  const a2 = entry.amount_元?.[y2] ?? null;
+  const p1 = entry.page?.[y1] ?? null;
+  const p2 = entry.page?.[y2] ?? null;
+  const n1 = entry.name?.[y1] ?? null;
+  const n2 = entry.name?.[y2] ?? null;
+
+  const statusBadge =
+    entry.status === `only_${y1}`
+      ? ` <span class="badge">僅${esc(y1)}</span>`
+      : entry.status === `only_${y2}`
+        ? ` <span class="badge">僅${esc(y2)}</span>`
+        : "";
+  const unresolvedBadge = entry.unresolved ? ' <span class="badge">⚠ 未解決</span>' : "";
+  const nameNote = entry.name_changed
+    ? `<div class="note">${esc(y1)} 名稱：${esc(n1)} → ${esc(y2)} 名稱：${esc(n2)}</div>`
+    : "";
+  const hierarchyNote = !entry.in_hierarchy
+    ? `<p class="note">此項目未掛入總表階層，僅見於明細表。</p>`
+    : "";
+
+  const selfRow = `<tr>
+    <td><strong>${esc(entry.display_name)}</strong>${statusBadge}${unresolvedBadge}<div class="note">${esc(entry.level)} ${esc(entry.code)}${entry.dept ? "　" + esc(entry.dept) : ""}</div>${nameNote}</td>
+    <td class="num">${a1 !== null ? fmt(a1) : `僅${esc(y2)}`}</td>
+    <td class="num">${a2 !== null ? fmt(a2) : `僅${esc(y1)}`}</td>
+    <td class="num">${esc(fmtDiff(entry.diff_元))}</td>
+    <td class="num">${esc(fmtPct(entry, y1, y2))}</td>
+    <td class="num">${p1 ? esc(pageText(p1)) : "—"}</td>
+    <td class="num">${p2 ? esc(pageText(p2)) : "—"}</td>
+  </tr>`;
+
+  const childItems = (entry.children || []).map((ck) => compare.entries[ck]).filter(Boolean);
+  let childrenSection = "";
+  if (childItems.length > 0) {
+    const childRows = childItems.map((ch) => {
+      const ca1 = ch.amount_元?.[y1] ?? null;
+      const ca2 = ch.amount_元?.[y2] ?? null;
+      const cp1 = ch.page?.[y1] ?? null;
+      const cp2 = ch.page?.[y2] ?? null;
+      const cn1 = ch.name?.[y1] ?? null;
+      const cn2 = ch.name?.[y2] ?? null;
+      const chStatusBadge =
+        ch.status === `only_${y1}`
+          ? ` <span class="badge">僅${esc(y1)}</span>`
+          : ch.status === `only_${y2}`
+            ? ` <span class="badge">僅${esc(y2)}</span>`
+            : "";
+      const chUnresolved = ch.unresolved ? ' <span class="badge">⚠ 未解決</span>' : "";
+      const chNameDiff = ch.name_changed
+        ? `<div class="note">${esc(y1)}：${esc(cn1)} → ${esc(y2)}：${esc(cn2)}</div>`
+        : "";
+      const to = href(year, "比較", { kind: ch.kind, code: ch.code });
+      return `<tr class="click" data-to="${esc(to)}">
+        <td><a href="${esc(to)}">${esc(ch.display_name)}</a>${chStatusBadge}${chUnresolved}<div class="note">${esc(ch.level)} ${esc(ch.code)}</div>${chNameDiff}</td>
+        <td class="num">${ca1 !== null ? fmt(ca1) : `僅${esc(y2)}`}</td>
+        <td class="num">${ca2 !== null ? fmt(ca2) : `僅${esc(y1)}`}</td>
+        <td class="num">${esc(fmtDiff(ch.diff_元))}</td>
+        <td class="num">${esc(fmtPct(ch, y1, y2))}</td>
+        <td class="num">${cp1 ? esc(pageText(cp1)) : "—"}</td>
+        <td class="num">${cp2 ? esc(pageText(cp2)) : "—"}</td>
+      </tr>`;
+    });
+    childrenSection = `
+      <h2>下一層項目對照（依編號合併，共 ${childItems.length} 項）</h2>
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th>名稱 / 編號</th>
+              <th class="num">${esc(y1)} 年度（元）</th>
+              <th class="num">${esc(y2)} 年度（元）</th>
+              <th class="num">差額（元）</th>
+              <th class="num">增減 %</th>
+              <th class="num">${esc(y1)} 頁碼</th>
+              <th class="num">${esc(y2)} 頁碼</th>
+            </tr>
+          </thead>
+          <tbody>${childRows.join("")}</tbody>
+        </table>
+      </div>`;
+  } else {
+    childrenSection = `<p class="note">此項目（${esc(entry.level)}）無下一層比較子項。</p>`;
+  }
+
+  $app.innerHTML = `
+    <div class="crumbs">${crumbs.join('<span class="sep">›</span>')}</div>
+    <h1>${esc(entry.display_name)} <span class="muted">${esc(entry.level)} ${esc(entry.code)}（${esc(y1)} vs ${esc(y2)} 比較）</span>${statusBadge}${unresolvedBadge}</h1>
+    ${drillLink ? `<p><a class="btn btn-sm" href="${esc(drillLink)}">返回 ${esc(year)} 年度此項明細</a></p>` : ""}
+    ${hierarchyNote}
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr>
+            <th>本項摘要</th>
+            <th class="num">${esc(y1)} 年度（元）</th>
+            <th class="num">${esc(y2)} 年度（元）</th>
+            <th class="num">差額（元）</th>
+            <th class="num">增減 %</th>
+            <th class="num">${esc(y1)} 頁碼</th>
+            <th class="num">${esc(y2)} 頁碼</th>
+          </tr>
+        </thead>
+        <tbody>${selfRow}</tbody>
+      </table>
+    </div>
+    ${childrenSection}`;
+  $app.querySelectorAll("tr[data-to]").forEach((tr) => tr.addEventListener("click", () => { location.hash = tr.dataset.to; }));
 }
 
 function bindFind(year, data) {

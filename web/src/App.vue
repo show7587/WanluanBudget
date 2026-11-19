@@ -17,12 +17,19 @@ onMounted(async () => {
   }
 });
 
-const nav = [
-  { to: "總覽", label: "總覽" },
-  { to: "歲出", label: "歲出" },
-  { to: "歲入", label: "歲入" },
-  { to: "比較", label: "比較" },
-];
+const nav = computed(() => {
+  const items = [
+    { to: "總覽", label: "總覽" },
+    { to: "歲出", label: "歲出" },
+    { to: "歲入", label: "歲入" },
+    { to: "比較", label: "比較" },
+    { to: "搜尋", label: "搜尋" },
+  ];
+  // 參考表只有部分年度有；備註只在 index.memo_years 含該年度時顯示
+  if (index.value?.reference_years.includes(year.value)) items.push({ to: "參考表", label: "參考表" });
+  if (index.value?.memo_years.includes(year.value)) items.push({ to: "備註", label: "資料備註" });
+  return items;
+});
 
 function changeYear(e: Event): void {
   const y = (e.target as HTMLSelectElement).value;
@@ -49,7 +56,7 @@ const legacyHref = computed(() => `legacy/index.html#/${year.value || ""}`);
           <option v-for="y in index?.years ?? [year]" :key="y" :value="y">{{ y }} 年度</option>
         </select>
       </label>
-      <a class="legacy" :href="legacyHref">搜尋／參考表／備註（舊版）</a>
+      <a class="legacy" :href="legacyHref">舊版網站</a>
     </div>
   </header>
   <main id="main" tabindex="-1">

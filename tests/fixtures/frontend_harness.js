@@ -163,6 +163,15 @@ async function runScenario(hash, navMode, opts = {}) {
         }
         text = JSON.stringify(d);
       }
+      if (opts.injectMemos && p === "data/memos.json") {
+        const d = JSON.parse(text);
+        for (const m of opts.injectMemos) {
+          const yKey = String(m.year);
+          if (!d.years[yKey]) d.years[yKey] = [];
+          d.years[yKey].push(m);
+        }
+        text = JSON.stringify(d);
+      }
       if (opts.overrideMemoYears && p === "data/index.json") {
         const d = JSON.parse(text);
         d.memo_years = opts.overrideMemoYears;
@@ -235,6 +244,15 @@ async function runScenario(hash, navMode, opts = {}) {
     const d114 = docs.find((d) => d.id === "114-revenue-12120010204-1") || null;
     const sampleNoMemo = docs.find((d) => d.id === "114-revenue-01120011401-1") || null;
     const rawMutated = rawSearchDocsRef ? JSON.stringify(rawSearchDocsRef) !== rawSearchDocsSnapshot : false;
+    const inspectedDocs = {};
+    for (const docId of opts.inspectDocIds || []) {
+      const foundDoc = docs.find((d) => d.id === docId) || null;
+      inspectedDocs[docId] = {
+        found: Boolean(foundDoc),
+        hasAliasKey: foundDoc ? Object.prototype.hasOwnProperty.call(foundDoc, "alias") : false,
+        alias: foundDoc ? (foundDoc.alias ?? null) : null,
+      };
+    }
     searchStub = {
       constructed: searchRecord.constructed,
       fields: searchRecord.fields,
@@ -243,6 +261,7 @@ async function runScenario(hash, navMode, opts = {}) {
       doc114Alias: d114 ? d114.alias ?? null : null,
       sampleNoMemoHasAliasKey: sampleNoMemo ? Object.prototype.hasOwnProperty.call(sampleNoMemo, "alias") : null,
       rawSearchMutated: rawMutated,
+      inspectedDocs,
     };
   }
 
@@ -309,6 +328,68 @@ async function runScenario(hash, navMode, opts = {}) {
     ["#/114/備註", "current", { id: "memos404_page", memos404: true }],
     ["#/114/備註", "current", { id: "memo_escape_page", injectMemoHtml: "<img src=x onerror=alert(1)>" }],
     [rev114Memo, "current", { id: "memo_escape_panel", injectMemoHtml: "<img src=x onerror=alert(1)>", clickMemoId: "M114-0001" }],
+    [
+      "#/114/搜尋?q=" + encodeURIComponent("ZZYESALIAS"),
+      "current",
+      {
+        id: "search_alias_type_filter",
+        injectMemos: [
+          {
+            memo_id: "M114-TEST-NON-TYPO",
+            year: 114,
+            scope: "revenue_item",
+            page: 39,
+            locator: "01120010201:1",
+            field: "note",
+            type: "print_inconsistent",
+            printed_text: "orig",
+            data_text: "orig",
+            suggested_text: "ZZNOALIAS",
+            note: "測試非 print_typo 不應併入 alias",
+            pdf_file: "test.pdf",
+            pdf_page: 45,
+            verified_method: "測試",
+            verified_on: "2026-11-19",
+            evidence: "",
+            status: "confirmed",
+            target: {
+              kind: "revenue",
+              search_id: "114-revenue-01120010201-1",
+              code: "01120010201",
+              item_seq: 1,
+              page: 39,
+            },
+          },
+          {
+            memo_id: "M114-TEST-TYPO",
+            year: 114,
+            scope: "revenue_item",
+            page: 39,
+            locator: "01120010202:1",
+            field: "note",
+            type: "print_typo",
+            printed_text: "orig",
+            data_text: "orig",
+            suggested_text: "ZZYESALIAS",
+            note: "測試 print_typo 應併入 alias",
+            pdf_file: "test.pdf",
+            pdf_page: 45,
+            verified_method: "測試",
+            verified_on: "2026-11-19",
+            evidence: "",
+            status: "confirmed",
+            target: {
+              kind: "revenue",
+              search_id: "114-revenue-01120010202-1",
+              code: "01120010202",
+              item_seq: 1,
+              page: 39,
+            },
+          },
+        ],
+        inspectDocIds: ["114-revenue-01120010201-1", "114-revenue-01120010202-1"],
+      },
+    ],
   ];
   const out = [];
   for (const [hash, mode, opts] of scenarios) out.push(await runScenario(hash, mode, opts));

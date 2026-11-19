@@ -88,7 +88,7 @@ site/（純靜態）→ GitHub Pages（.github/workflows/pages.yml，push 到 ma
 - **驗證規則**：`scripts/memos.py` 的 `validate_memos_global` 與 `validate_memos(<年>)` 檢查 CSV 完整性、年度目錄存在與 V1–V7（唯一 ID、locator 恰好命中 1 列且頁碼相符、`data_text` 逐字 guard、`print_typo` 必填且不同的 `printed_text`/`suggested_text`、`pdf_sources.csv` 頁碼偏移、安全的 `docs/evidence/` 路徑且檔案存在、合法日期）。`validate.py` 與 `build.py` 共用同一組檢查，任一失敗皆中止且 `build.py` 不寫出 `memos.json`。
 - **建置輸出**：`site/data/memos.json`（依年度分組、帶解析後的 `target`）、SQLite `memos` 表、`site/data/index.json` 的 `memo_years`。
 - **前端行為**：依 `index.memo_years` 載入 `data/memos.json`（載入失敗快取為 `null`、優雅降級）；各畫面有備註的項目顯示 `ⓘ` 按鈕開啟共用詳情面板；備註頁 `#/<年>/備註` 支援 `type` 與 `p` 篩選與連回對應畫面；搜尋索引僅將 `print_typo` 的 `suggested_text` 併入 `alias` 欄位（避免其他類型的說明文字污染搜尋）。
-- **證據圖部署與本機預覽**：CI（`.github/workflows/pages.yml`）在打包前執行 `cp -r docs/evidence site/evidence`，不把圖片 commit 進 `site/`；`site/evidence/` 已加入 `.gitignore`。本機預覽若要看到證據圖可先執行 `cp -r docs/evidence site/evidence`，未複製時前端自動降級只顯示路徑文字。
+- **證據圖部署與本機預覽**：CI（`.github/workflows/pages.yml`）在打包前執行 `cp -r docs/evidence site/evidence`，不把圖片 commit 進 `site/`；`site/evidence/` 已加入 `.gitignore`。本機預覽若要看到證據圖可先執行 `mkdir -p site/evidence && cp -R docs/evidence/. site/evidence/`（可重複執行），未複製時前端自動降級只顯示路徑文字。
 - **新增／修改備註的標準作法**：先對照 PDF 原圖並視需要存證據圖 → 更新 `data/memos.csv`（必要時先補已核對的 `data/pdf_sources.csv`）→ 必跑 `python3 scripts/validate.py <年> [--partial]`、`python3 scripts/build.py`、`python3 -m unittest discover -s tests`。
 
 ## 驗證（validate.py）檢查什麼

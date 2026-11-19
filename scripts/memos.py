@@ -295,7 +295,7 @@ def validate_memos(year: str, root_dir: Path = ROOT_DIR) -> dict[str, Any]:
         mid = m.get("memo_id", "")
         id_counts[mid] = id_counts.get(mid, 0) + 1
 
-    year_memos = [m for m in all_memos if m.get("year") == year_str]
+    year_memos = [m for m in all_memos if (m.get("year") or "").strip() == year_str]
     if not year_memos:
         return {
             "year": year_str,
@@ -327,11 +327,17 @@ def validate_memos(year: str, root_dir: Path = ROOT_DIR) -> dict[str, Any]:
         evidence = (m.get("evidence") or "").strip()
         status = (m.get("status") or "").strip()
 
-        # V1: 欄位與列舉值合法、memo_id 唯一
+        # V1: 欄位與列舉值合法、memo_id 唯一、year/page/pdf_page 前後無空白
         if not memo_id:
             errors.append("V1: memo_id 不可為空")
         elif id_counts.get(memo_id, 0) > 1:
             errors.append(f"V1: memo_id 重複：{memo_id}")
+        for col in ("year", "page", "pdf_page"):
+            raw_val = m.get(col) or ""
+            if raw_val != raw_val.strip():
+                errors.append(
+                    f"V1: {memo_id or '(無 memo_id)'} 的 {col} 欄位前後不可有空白：{raw_val!r}"
+                )
         if scope not in VALID_SCOPES:
             errors.append(f"V1: scope 不合法：{scope!r}")
         if m_type not in VALID_TYPES:

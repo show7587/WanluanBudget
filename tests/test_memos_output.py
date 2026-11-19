@@ -22,6 +22,7 @@ from scripts.memos import MEMO_COLUMNS
 
 _REV_SEARCH_ID_RE = re.compile(r"^(\d+)-revenue-([^-]+)-(\d+)$")
 _EXP_SEARCH_ID_RE = re.compile(r"^(\d+)-expenditure-([^-]+)-([^-]+)-(\d+)$")
+_REF_LOCATOR_RE = re.compile(r"^r(\d+)c(\d+)$")
 _INT_FIELDS = ("year", "page", "pdf_page")
 
 
@@ -246,11 +247,20 @@ def verify_memos_targets(
                 if target.get("kind") != "reference":
                     errors.append(f"{mid}: expected target.kind='reference', got {target.get('kind')!r}")
                     continue
+                loc_match = _REF_LOCATOR_RE.match(locator)
+                if not loc_match:
+                    errors.append(f"{mid}: invalid reference_cell locator {locator!r}")
+                    continue
+                loc_row, loc_col = int(loc_match.group(1)), int(loc_match.group(2))
                 t_page = target.get("page")
                 t_row = target.get("row")
                 t_col = target.get("col")
                 if t_page != page:
                     errors.append(f"{mid}: target.page={t_page} != memo page={page}")
+                if t_row != loc_row:
+                    errors.append(f"{mid}: target.row={t_row} != locator row={loc_row} ({locator!r})")
+                if t_col != loc_col:
+                    errors.append(f"{mid}: target.col={t_col} != locator col={loc_col} ({locator!r})")
                 if (t_page, t_row, t_col) not in ref_cells_cache.get(year, set()):
                     errors.append(
                         f"{mid}: reference cell (page={t_page}, r={t_row}, c={t_col}) not found in reference_{year}.json"
@@ -407,6 +417,23 @@ class TestMemosOutputVerification(unittest.TestCase):
         self.assertTrue(errs_target, "page+1 was not caught by target verification")
         self.assertTrue(errs_exact, "page+1 was not caught by exact field verification")
 
+    def test_mutation_e_reference_cell_row_col_page_plus_one_caught(self) -> None:
+        self.assertEqual(
+            verify_memos_targets(
+                self.memos_data, ROOT_DIR / "data", self.search_docs, self.reference_by_year
+            ),
+            [],
+        )
+        for field in ("row", "col", "page"):
+            with self.subTest(field=field):
+                mut = copy.deepcopy(self.memos_data)
+                m = self._find_memo(mut, "M114-0011")
+                m["target"][field] = m["target"][field] + 1
+                errs = verify_memos_targets(
+                    mut, ROOT_DIR / "data", self.search_docs, self.reference_by_year
+                )
+                self.assertTrue(errs, f"reference_cell target.{field}+1 was not caught")
+
 
 class TestBuildMemosValidationParity(unittest.TestCase):
     """A2: build() must enforce the same validation as validate.py and not write memos.json on failure."""
@@ -481,6 +508,36 @@ class TestBuildMemosValidationParity(unittest.TestCase):
                 build(data_dir=renamed, out_dir=tmp_root / "build", site_dir=site_dir)
             self.assertIn("custom_data", str(ctx.exception))
             self.assertFalse((site_dir / "memos.json").exists())
+
+    def test_build_rejects_mismatched_root_dir_and_data_dir_memos_csv(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            tmp_root = _setup_temp_repo_116(Path(td))
+            renamed = tmp_root / "custom_data"
+            (tmp_root / "data").rename(renamed)
+            site_dir = tmp_root / "site"
+            with self.assertRaises(ValueError) as ctx:
+                build(
+                    data_dir=renamed,
+                    out_dir=tmp_root / "build",
+                    site_dir=site_dir,
+                    root_dir=ROOT_DIR,
+                )
+            msg = str(ctx.exception)
+            self.assertIn(str((ROOT_DIR / "data").resolve()), msg)
+            self.assertIn(str(renamed.resolve()), msg)
+            self.assertFalse((site_dir / "memos.json").exists())
+
+    def test_build_accepts_consistent_explicit_root_dir_and_data_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            tmp_root = _setup_temp_repo_116(Path(td))
+            site_dir = tmp_root / "site"
+            build(
+                data_dir=tmp_root / "data",
+                out_dir=tmp_root / "build",
+                site_dir=site_dir,
+                root_dir=tmp_root,
+            )
+            self.assertTrue((site_dir / "memos.json").is_file())
 
 
 if __name__ == "__main__":

@@ -161,7 +161,7 @@ onBeforeUnmount(() => {
   chart.value = null;
 });
 
-watch(() => [props.nodes, props.total, props.centerTitle], render, { deep: true });
+watch(() => [props.nodes, props.total, props.centerTitle], render);
 </script>
 
 <template>
@@ -184,7 +184,7 @@ watch(() => [props.nodes, props.total, props.centerTitle], render, { deep: true 
           <span class="name">{{ n.name }}</span>
           <span class="meta num">
             <span class="pct">{{ fmtPct(shareOf(n.amount)) }}</span>
-            <span class="amt muted">{{ fmtCompact(n.amount) }}</span>
+            <span class="amt muted">{{ fmtInt(n.amount) }} 元</span>
           </span>
         </button>
       </li>

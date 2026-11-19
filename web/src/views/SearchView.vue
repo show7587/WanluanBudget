@@ -227,14 +227,14 @@ async function ensureYearLookup(y: number): Promise<void> {
   }
 }
 
-watch(
-  visibleHits,
-  (hits) => {
-    const years = new Set(hits.map((h) => Number(h.year)).filter(Boolean));
-    for (const y of years) void ensureYearLookup(y);
-  },
-  { immediate: true },
-);
+// 點擊結果時才載入該年度的階層資料來算完整路徑（避免「全部年度」搜尋一次抓所有年度的 JSON）
+async function onHitClick(e: MouseEvent, hit: SearchHit): Promise<void> {
+  if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  e.preventDefault();
+  await ensureYearLookup(Number(hit.year));
+  const link = getLink(hit);
+  if (link) void router.push(link.to);
+}
 
 const statusSummary = computed(() => {
   if (!activeQuery.value) return "";
@@ -396,12 +396,12 @@ function getTitleSegments(hit: SearchHit) {
           <article class="hit-article">
             <div class="hit-head">
               <h2 class="hit-title">
-                <router-link v-if="getLink(hit)" :to="getLink(hit)!.to" class="hit-title-link">
+                <a v-if="getLink(hit)" :href="router.resolve(getLink(hit)!.to).href" class="hit-title-link" @click="onHitClick($event, hit)">
                   <template v-for="(seg, idx) in getTitleSegments(hit)" :key="idx">
                     <mark v-if="seg.hit" class="hl">{{ seg.text }}</mark>
                     <template v-else>{{ seg.text }}</template>
                   </template>
-                </router-link>
+                </a>
                 <template v-else>
                   <template v-for="(seg, idx) in getTitleSegments(hit)" :key="idx">
                     <mark v-if="seg.hit" class="hl">{{ seg.text }}</mark>
@@ -663,22 +663,6 @@ function getTitleSegments(hit: SearchHit) {
   text-underline-offset: 2px;
   padding: 0 2px;
   border-radius: 3px;
-}
-
-.hit-footer {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.goto-link {
-  font-size: var(--fs-sm);
-  font-weight: 600;
-  text-decoration: none;
-  padding: 4px 2px;
-}
-
-.goto-link:hover {
-  text-decoration: underline;
 }
 
 .more-wrap {

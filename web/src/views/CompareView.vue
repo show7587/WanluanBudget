@@ -178,7 +178,7 @@ function diffTone(diff: number): "good" | "bad" | "neutral" {
           label="歲出總額增減"
           :value="`${diffSymbol(expSummary.netDiff)} ${fmtSignedYuan(expSummary.netDiff)}`"
           :sub="`${fmtSignedPct(expSummary.netPct)}（${compare.to_year} 年 ${fmtCompact(expSummary.curTotal)} vs ${compare.from_year} 年 ${fmtCompact(expSummary.prevTotal)}）`"
-          :tone="diffTone(expSummary.netDiff)"
+          tone="neutral"
         />
         <KpiCard
           label="歲入總額增減"

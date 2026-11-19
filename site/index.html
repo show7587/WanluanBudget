@@ -14,6 +14,7 @@
     <a href="#/歲出" data-nav="exp">歲出</a>
     <a href="#/歲入" data-nav="rev">歲入</a>
     <a href="#/參考表" data-nav="ref" hidden>參考表</a>
+    <a href="#/備註" data-nav="memo" hidden>資料備註</a>
   </nav>
   <select id="yearSel" class="year" aria-label="年度"></select>
   <form id="searchForm" class="search" role="search">
@@ -22,6 +23,7 @@
   </form>
 </header>
 <main id="app" aria-live="polite"><p class="muted">載入中…</p></main>
+<aside id="memoPanel" class="memo-panel" hidden aria-label="資料備註詳情"></aside>
 <footer class="foot">資料來源：萬巒鄉預算書（OCR 轉檔後人工校正，每筆修正見 data/corrections.csv）。金額單位：元。頁碼為預算書頁碼。</footer>
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/minisearch@7.1.0/dist/umd/index.min.js"></script>

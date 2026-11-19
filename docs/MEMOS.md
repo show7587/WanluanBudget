@@ -106,3 +106,43 @@ UTF-8 編碼，標準 CSV 引號規則（含逗號、引號、換行者以雙引
 ### `site/data/index.json`
 
 - 新增 `memo_years` 整數陣列（遞增排序，列出有備註的年度，例如 `[114, 115, 116]`）。其餘欄位與既有建置結果完全相同。
+
+## 8. 網站呈現（`site/`）
+
+### 資料載入與容錯
+
+- 前端僅在 `site/data/index.json` 的 `memo_years` 涵蓋目前年度時才請求 `data/memos.json`；任何載入失敗（404、網路錯誤、JSON 解析失敗）一律回傳 `null` 並快取，不重複請求、不影響既有頁面顯示。
+- 沒有備註的列、沒有備註資料的年度或 `memos.json` 載入失敗時，既有畫面與原版完全一致（不出現 `ⓘ`，也不出現「載入失敗」）；僅在直接開啟備註頁且載入失敗時顯示「備註資料無法載入」。
+
+### `ⓘ` 標記掛載規則與詳情面板
+
+有備註的項目旁顯示 `<button type="button" class="memo-btn" data-memo="..." aria-label="...">ⓘ</button>`，點擊開啟單一共用的詳情面板（桌機為右下浮動卡片，手機寬度 ≤ 640px 為貼底卡片；可由關閉鈕、再點同一個 `ⓘ` 或按 `Esc` 關閉）。點擊 `ⓘ` 不會觸發所在列（`tr[data-to]`）的導覽。多筆備註對應同一掛載點時，單一 `ⓘ` 內一次列出全部。
+
+| `target.kind` | 掛載位置 |
+|---|---|
+| `revenue` | 歲入細目頁 `detailTable` 內 `code` 與 `item_seq` 皆相符的列；上層 `childTable` 中 `level=細目` 且 `code` 相符的列 |
+| `expenditure` | 歲出用途別頁 `detailTable` 內 `plan_code`、`用途別_code`、`item_seq` 皆相符的列；`childTable` 中對應 `用途別` 列與 `工作計畫` 列（含其下屬歲出備註） |
+| `plan` | 歲出 `childTable` 與頁首的對應 `工作計畫` |
+| `summary` | 備註頁與搜尋結果（以搜尋文件 `id == target.search_id` 比對） |
+| `reference` | 參考表對應頁碼與 `(r, c)` 的 `<td>`（附加 `has-memo` class，不更動儲存格順序與 rowspan） |
+| `page` | 參考表該頁頁首的頁碼／單位說明列 |
+| 搜尋結果 | 任何搜尋文件 `id` 等於備註 `target.search_id` 的結果列 |
+
+詳情面板與備註頁共用同一套欄位渲染邏輯，所有文字皆經 `esc()` 跳脫；顯示中文類型、頁碼、原書印刷（`printed_text`）、資料目前存的（`data_text`）、建議寫法（`suggested_text`，空則省略）、說明（`note`）、來源 PDF 檔名與頁序、核對方式與日期、狀態與證據圖。
+
+### 備註頁（`#/<年>/備註`）
+
+- 導覽列「資料備註」連結僅在 `index.memo_years` 含目前年度時顯示；直接開啟無備註年度的 `#/<年>/備註` 時導向該年度總覽。
+- 支援 URL 篩選參數 `type`（備註類型）與 `p`（書面頁碼），兩者可組合；卡片依 `memo_id` 穩定排序，並提供連回對應歲入／歲出／搜尋／參考表畫面的連結。
+
+### 搜尋別名（`mergeMemoAliases`）
+
+- 建立 MiniSearch 索引時，純函式 `mergeMemoAliases(docs, memos)` 只將 `type === "print_typo"` 且 `suggested_text` 非空的備註併入對應搜尋文件的 `alias` 欄位，並將 `"alias"` 加入 MiniSearch 的 `fields`（不修改原始文件物件，無對應備註的文件不新增 `alias` 鍵）。
+- **只併 `print_typo` 的理由**：其他類型（如 `print_layout`、`print_inconsistent`、`data_gap`）的 `suggested_text` 可能是說明性文字或跨頁組合詞，併入搜尋索引會造成非預期命中並污染搜尋結果；僅收錄 `print_typo` 可精準解決「原書錯字導致正確寫法查不到」（如「自治修例」→「自治條例」）的需求。
+
+### 證據圖部署、降級與本機預覽
+
+- 證據圖版本控管於 `docs/evidence/<年>/<memo_id>.png`，不 commit 進 `site/`；`site/evidence/` 已加入 `.gitignore`。
+- GitHub Actions（`.github/workflows/pages.yml`）在 `actions/upload-pages-artifact@v3` 之前執行 `cp -r docs/evidence site/evidence`，使發佈後的網站可由相對路徑 `evidence/<年>/<memo_id>.png` 載入。
+- 前端只處理以 `docs/evidence/` 開頭的 `evidence` 路徑；圖片載入失敗時（例如本機預覽未複製圖片）會移除 `<img>` 並優雅降級為只顯示路徑文字，不呈現破圖。
+- **本機預覽顯示證據圖**：在 repo 根目錄執行 `cp -r docs/evidence site/evidence` 後，再 `cd site && python3 -m http.server <埠>` 開啟。

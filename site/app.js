@@ -52,6 +52,200 @@ async function getCompare(pair) {
   return comparePromises[pair];
 }
 
+// ---------- 資料備註 ----------
+const MEMO_TYPES = {
+  print_typo: "原書錯字",
+  print_inconsistent: "原書前後不一致",
+  print_layout: "原書版面",
+  data_gap: "資料缺口",
+};
+const MEMO_STATUSES = {
+  confirmed: "已對照原圖",
+  pending_publisher: "待公所確認",
+};
+const hasMemos = (index, year) => Boolean(index && (index.memo_years || []).map(String).includes(String(year)));
+
+// 備註資料由單一 data/memos.json 載入；失敗（404、網路、JSON 錯誤）快取為 null，不重複請求也不中斷頁面。
+let memosPromise = null;
+async function fetchMemosFile() {
+  if (!memosPromise) {
+    memosPromise = fetch("data/memos.json")
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null);
+  }
+  return memosPromise;
+}
+
+async function getMemos(index, year) {
+  if (year !== undefined && year !== null) {
+    if (!hasMemos(index, year)) return null;
+    const data = await fetchMemosFile();
+    return data && data.years ? (data.years[String(year)] || []) : null;
+  }
+  if (!index || !(index.memo_years || []).length) return null;
+  return fetchMemosFile();
+}
+
+/**
+ * 純函式：將 print_typo 類備註的 suggested_text 併入對應搜尋文件的 alias 欄位。
+ * @param {Array<Object>} docs - search.json 的文件陣列（不會被修改）
+ * @param {Object|Array<Object>|null} memos - memos.json 物件（含 years 鍵）或已展平的備註陣列
+ * @returns {Array<Object>} 新的文件陣列；無對應 print_typo 備註的文件保持原物件且不新增 alias 鍵
+ */
+function mergeMemoAliases(docs, memos) {
+  if (!Array.isArray(docs)) return [];
+  const list = Array.isArray(memos)
+    ? memos
+    : memos && memos.years
+      ? Object.values(memos.years).flat()
+      : [];
+  const aliasById = new Map();
+  for (const m of list) {
+    if (!m || m.type !== "print_typo" || !m.suggested_text) continue;
+    const sid = m.target && m.target.search_id;
+    if (!sid) continue;
+    const prev = aliasById.get(sid);
+    aliasById.set(sid, prev ? `${prev} ${m.suggested_text}` : m.suggested_text);
+  }
+  if (!aliasById.size) return docs.slice();
+  return docs.map((doc) => {
+    const alias = aliasById.get(doc.id);
+    return alias ? { ...doc, alias } : doc;
+  });
+}
+
+// 各畫面掛載點的備註篩選函式
+function memosForRevenueItem(memos, code, itemSeq) {
+  if (!memos || !memos.length) return [];
+  return memos.filter((m) => m.target && m.target.kind === "revenue" && m.target.code === code && Number(m.target.item_seq) === Number(itemSeq));
+}
+function memosForRevenueFine(memos, code) {
+  if (!memos || !memos.length) return [];
+  return memos.filter((m) => m.target && m.target.kind === "revenue" && m.target.code === code);
+}
+function memosForExpenditureItem(memos, planCode, useCode, itemSeq) {
+  if (!memos || !memos.length) return [];
+  return memos.filter((m) => m.target && m.target.kind === "expenditure" && m.target.plan_code === planCode && m.target["用途別_code"] === useCode && Number(m.target.item_seq) === Number(itemSeq));
+}
+function memosForExpenditureUse(memos, planCode, useCode) {
+  if (!memos || !memos.length) return [];
+  return memos.filter((m) => m.target && m.target.kind === "expenditure" && m.target.plan_code === planCode && m.target["用途別_code"] === useCode);
+}
+function memosForPlanOnly(memos, planCode) {
+  if (!memos || !memos.length) return [];
+  return memos.filter((m) => m.target && m.target.kind === "plan" && m.target.plan_code === planCode);
+}
+function memosForPlan(memos, planCode) {
+  if (!memos || !memos.length) return [];
+  return memos.filter((m) => m.target && (m.target.kind === "plan" || m.target.kind === "expenditure") && m.target.plan_code === planCode);
+}
+function memosForSearchDoc(memos, docId) {
+  if (!memos || !memos.length || !docId) return [];
+  return memos.filter((m) => m.target && m.target.search_id === docId);
+}
+function memosForRefCell(memos, page, r, c) {
+  if (!memos || !memos.length) return [];
+  return memos.filter((m) => m.target && m.target.kind === "reference" && Number(m.target.page) === Number(page) && Number(m.target.row) === Number(r) && Number(m.target.col) === Number(c));
+}
+function memosForRefPage(memos, page) {
+  if (!memos || !memos.length) return [];
+  return memos.filter((m) => m.target && m.target.kind === "page" && Number(m.target.page) === Number(page));
+}
+
+function memoBtn(memos) {
+  if (!memos || !memos.length) return "";
+  const ids = memos.map((m) => m.memo_id).join(",");
+  const label = memos.length === 1 ? `備註 ${memos[0].memo_id}` : `備註 ${memos[0].memo_id} 等 ${memos.length} 筆`;
+  return ` <button type="button" class="memo-btn" data-memo="${esc(ids)}" aria-label="${esc(label)}" title="${esc(label)}">ⓘ</button>`;
+}
+
+function renderMemoFields(m) {
+  const ev = m.evidence && String(m.evidence).startsWith("docs/evidence/") ? String(m.evidence) : "";
+  const evHtml = ev
+    ? `<div class="memo-evidence"><img src="${esc(ev.slice("docs/".length))}" alt="證據截圖 ${esc(m.memo_id)}" loading="lazy"><div class="memo-evidence-path note">${esc(ev)}</div></div>`
+    : "";
+  return `
+    <dl class="memo-dl">
+      <dt>原書印刷</dt><dd><code class="memo-code">${m.printed_text ? esc(m.printed_text) : "—"}</code></dd>
+      <dt>資料目前存的</dt><dd><code class="memo-code">${m.data_text ? esc(m.data_text) : "—"}</code></dd>
+      ${m.suggested_text ? `<dt>建議寫法</dt><dd><code class="memo-code">${esc(m.suggested_text)}</code></dd>` : ""}
+      <dt>說明</dt><dd>${esc(m.note)}</dd>
+      <dt>來源 PDF</dt><dd>${esc(m.pdf_file)}（第 ${esc(m.pdf_page)} 頁）</dd>
+      <dt>核對</dt><dd>${esc(m.verified_method)}（${esc(m.verified_on)}）</dd>
+      <dt>狀態</dt><dd>${esc(MEMO_STATUSES[m.status] || m.status)}</dd>
+    </dl>${evHtml}`;
+}
+
+let activeMemoKey = null;
+let currentMemoMap = new Map();
+let memoPanelBound = false;
+
+function handleEvidenceImgError(e) {
+  const t = e && e.target;
+  if (t && t.tagName === "IMG" && t.parentElement && t.parentElement.classList && t.parentElement.classList.contains("memo-evidence")) {
+    t.remove();
+  }
+}
+
+function getMemoPanel() {
+  let el = document.getElementById("memoPanel");
+  if (!el && typeof document.createElement === "function" && document.body) {
+    el = document.createElement("aside");
+    el.id = "memoPanel";
+    el.className = "memo-panel";
+    el.hidden = true;
+    el.setAttribute("aria-label", "資料備註詳情");
+    document.body.appendChild(el);
+  }
+  if (el && !memoPanelBound && typeof el.addEventListener === "function") {
+    memoPanelBound = true;
+    el.addEventListener("click", (e) => {
+      if (e && e.target && typeof e.target.closest === "function" && e.target.closest(".memo-close")) {
+        closeMemoPanel();
+      }
+    });
+    el.addEventListener("error", handleEvidenceImgError, true);
+  }
+  return el || null;
+}
+
+function closeMemoPanel() {
+  const panel = getMemoPanel();
+  if (panel) {
+    panel.hidden = true;
+    panel.innerHTML = "";
+  }
+  activeMemoKey = null;
+}
+
+function openMemoPanel(idsStr) {
+  const panel = getMemoPanel();
+  if (!panel) return;
+  if (!panel.hidden && activeMemoKey === idsStr) {
+    closeMemoPanel();
+    return;
+  }
+  const ids = String(idsStr || "").split(",").filter(Boolean);
+  const items = ids.map((id) => currentMemoMap.get(id)).filter(Boolean);
+  if (!items.length) {
+    closeMemoPanel();
+    return;
+  }
+  activeMemoKey = idsStr;
+  const title = items.length === 1 ? `資料備註：${esc(items[0].memo_id)}` : `資料備註（共 ${items.length} 筆）`;
+  const body = items.map((m) => `
+    <div class="memo-item">
+      <div class="memo-meta">
+        <strong>${esc(m.memo_id)}</strong>
+        <span class="badge">${esc(MEMO_TYPES[m.type] || m.type)}</span>
+        <span class="muted">p${esc(m.page)}</span>
+      </div>
+      ${renderMemoFields(m)}
+    </div>`).join("");
+  panel.innerHTML = `<div class="memo-panel-head"><h3>${title}</h3><button type="button" class="memo-close" aria-label="關閉">✕</button></div>${body}`;
+  panel.hidden = false;
+}
+
 // 相鄰年度對：由 index.years 推出，如 ["114-115", "115-116"]
 function adjacentPairs(index) {
   const ys = index.years.map(Number).sort((a, b) => a - b);
@@ -107,6 +301,7 @@ function parseHash() {
 async function render() {
   charts.forEach((c) => c.dispose());
   charts = [];
+  closeMemoPanel();
   try {
     const index = await loadJson("data/index.json");
     const r = parseHash();
@@ -116,17 +311,23 @@ async function render() {
       return;
     }
     const pair = pickPair(index, year, r.view === "比較" ? r.params : null);
-    const [data, compare] = await Promise.all([
+    const [data, compare, yearMemos] = await Promise.all([
       loadJson(`data/${year}.json`),
       getCompare(pair),
+      getMemos(index, year),
     ]);
+    currentMemoMap = new Map((yearMemos || []).map((m) => [m.memo_id, m]));
     setNav(r.view, year, index);
-    if (r.view === "歲入" || r.view === "歲出") renderDrill(year, r.view, data, r.params, compare);
-    else if (r.view === "搜尋") await renderSearch(year, data, r.params, compare);
+    if (r.view === "歲入" || r.view === "歲出") renderDrill(year, r.view, data, r.params, compare, yearMemos);
+    else if (r.view === "搜尋") await renderSearch(year, data, r.params, compare, index, yearMemos);
     else if (r.view === "比較") renderCompare(year, data, r.params, compare, pair, defaultPair(index, year));
     else if (r.view === "參考表") {
       if (!hasReference(index, year)) { location.replace(href(year, "總覽")); return; } // 該年度沒有參考表：導向總覽
-      await renderReference(year, r.params);
+      await renderReference(year, r.params, yearMemos);
+    }
+    else if (r.view === "備註") {
+      if (!hasMemos(index, year)) { location.replace(href(year, "總覽")); return; } // 該年度沒有備註：導向總覽
+      renderMemosPage(year, data, r.params, yearMemos);
     }
     else renderOverview(year, data);
     window.scrollTo(0, 0);
@@ -146,6 +347,14 @@ $yearSel.addEventListener("change", () => {
     loadJson("data/index.json").then((index) => {
       if (!hasReference(index, $yearSel.value)) location.hash = href($yearSel.value, "總覽");
       else location.hash = href($yearSel.value, "參考表", r.params.get("p") ? { p: r.params.get("p") } : {});
+    }).catch(() => { location.hash = href($yearSel.value, "總覽"); });
+    return;
+  }
+  if (view === "備註") {
+    // 切到沒有備註的年度時導向該年度總覽；有備註的年度保留在備註頁並清除篩選參數
+    loadJson("data/index.json").then((index) => {
+      if (!hasMemos(index, $yearSel.value)) location.hash = href($yearSel.value, "總覽");
+      else location.hash = href($yearSel.value, "備註", {});
     }).catch(() => { location.hash = href($yearSel.value, "總覽"); });
     return;
   }
@@ -171,8 +380,13 @@ function setNav(view, year, index) {
     refA.setAttribute("href", href(year, "參考表"));
     refA.hidden = !hasReference(index, year);
   }
+  const memoA = document.querySelector('.nav a[data-nav="memo"]');
+  if (memoA) {
+    memoA.setAttribute("href", href(year, "備註"));
+    memoA.hidden = !hasMemos(index, year);
+  }
   document.querySelectorAll(".nav a").forEach((a) => {
-    const on = (a.dataset.nav === "ref" && view === "參考表") || (a.dataset.nav === "exp" && view === "歲出") || (a.dataset.nav === "rev" && view === "歲入") || (a.dataset.nav === "overview" && view === "總覽");
+    const on = (a.dataset.nav === "memo" && view === "備註") || (a.dataset.nav === "ref" && view === "參考表") || (a.dataset.nav === "exp" && view === "歲出") || (a.dataset.nav === "rev" && view === "歲入") || (a.dataset.nav === "overview" && view === "總覽");
     a.classList.toggle("on", on);
   });
 }
@@ -268,7 +482,7 @@ function getDrillCompareTarget(view, node) {
   return { kind: null, code: null };
 }
 
-function renderDrill(year, view, data, params, compare) {
+function renderDrill(year, view, data, params, compare, yearMemos) {
   const sec = SECTIONS[view];
   const root = data[sec.key];
   const { path, missing } = walkPath(root.hierarchy, sec.levels, params);
@@ -281,41 +495,55 @@ function renderDrill(year, view, data, params, compare) {
   });
   const parentAmt = cur ? cur.amount_元 : root.total_元;
   let body;
-  if (cur && (cur.level === "細目" || cur.level === "用途別")) body = detailTable(cur, view);
-  else body = childTable(year, view, cur ? cur.children : root.hierarchy, acc, parentAmt);
+  if (cur && (cur.level === "細目" || cur.level === "用途別")) body = detailTable(cur, view, yearMemos);
+  else body = childTable(year, view, cur ? cur.children : root.hierarchy, acc, parentAmt, yearMemos);
   const note = cur && cur.unresolved
     ? `<div class="warn"><strong>未解決</strong>：${esc(cur.note || cur.unresolved_note || "此項資料待核對")}</div>`
     : "";
   const cmpTarget = getDrillCompareTarget(view, cur);
   const cmpBtn = compareBtn(year, compare, cmpTarget.kind, cmpTarget.code);
+  const headMemoBtn = cur && cur.level === "工作計畫" ? memoBtn(memosForPlanOnly(yearMemos, cur.code)) : "";
   const head = cur
-    ? `<h1>${esc(cur.name)} <span class="muted">${esc(cur.level)}${cur.code ? " " + esc(cur.code) : ""}</span>${cmpBtn}</h1>
+    ? `<h1>${esc(cur.name)} <span class="muted">${esc(cur.level)}${cur.code ? " " + esc(cur.code) : ""}</span>${cmpBtn}${headMemoBtn}</h1>
        <p>預算 <strong>${fmt(cur.amount_元)}</strong> 元　${esc(pageText(cur))}${cur.dept ? "　承辦：" + esc(cur.dept) : ""}</p>`
     : `<h1>${esc(year)} 年度${esc(view)}　<span class="muted">${fmt(root.total_元)} 元</span></h1>`;
   $app.innerHTML = `<div class="crumbs">${crumbs.join('<span class="sep">›</span>')}</div>${missing ? `<p class="warn">找不到：${esc(missing)}</p>` : ""}${head}${note}${body}`;
-  $app.querySelectorAll("tr[data-to]").forEach((tr) => tr.addEventListener("click", () => { location.hash = tr.dataset.to; }));
+  $app.querySelectorAll("tr[data-to]").forEach((tr) => tr.addEventListener("click", (e) => {
+    if (e && e.target && typeof e.target.closest === "function" && e.target.closest(".memo-btn")) return;
+    location.hash = tr.dataset.to;
+  }));
 }
 
-function childTable(year, view, nodes, acc, parentAmt) {
+function childTable(year, view, nodes, acc, parentAmt, yearMemos) {
   const sec = SECTIONS[view];
   const rows = nodes.map((n) => {
     const nextLevel = sec.levels.find(([lvl]) => lvl === n.level);
     const to = nextLevel ? href(year, view, { ...acc, [nextLevel[1]]: nodeKey(n) }) : "";
     const pct = parentAmt ? Math.max(0, Math.min(100, (n.amount_元 / parentAmt) * 100)) : 0;
     const flag = n.unresolved ? ' <span class="badge" title="明細加總與表頭不一致，待核對">⚠ 未解決</span>' : "";
-    return `<tr class="click" data-to="${esc(to)}"><td><a href="${esc(to)}">${esc(n.name)}</a>${flag}<div class="note">${esc(n.level)}${n.code ? " " + esc(n.code) : ""}${n.dept ? "　" + esc(n.dept) : ""}</div></td>
+    let rowMemos = [];
+    if (n.level === "細目") rowMemos = memosForRevenueFine(yearMemos, n.code);
+    else if (n.level === "用途別") rowMemos = memosForExpenditureUse(yearMemos, n.plan_code, n.code);
+    else if (n.level === "工作計畫") rowMemos = memosForPlan(yearMemos, n.code);
+    const mBtn = memoBtn(rowMemos);
+    return `<tr class="click" data-to="${esc(to)}"><td><a href="${esc(to)}">${esc(n.name)}</a>${flag}${mBtn}<div class="note">${esc(n.level)}${n.code ? " " + esc(n.code) : ""}${n.dept ? "　" + esc(n.dept) : ""}</div></td>
       <td class="num">${fmt(n.amount_元)}<div class="bar"><i style="width:${pct.toFixed(1)}%"></i></div></td>
       <td class="num hide-sm">${pct.toFixed(1)}%</td><td class="num">${esc(pageText(n))}</td></tr>`;
   });
   return `<div class="tablewrap"><table><thead><tr><th>名稱</th><th class="num">預算（元）</th><th class="num hide-sm">占比</th><th class="num">頁碼</th></tr></thead><tbody>${rows.join("")}</tbody></table></div>`;
 }
 
-function detailTable(node, view) {
+function detailTable(node, view, yearMemos) {
   const items = node.children || [];
   const isExp = view === "歲出";
-  const rows = items.map((it) => `<tr><td>${esc(isExp ? it["說明"] : it.note || it.name)}${it.unresolved ? ' <span class="badge">⚠</span>' : ""}</td>
+  const rows = items.map((it) => {
+    const itemMemos = isExp
+      ? memosForExpenditureItem(yearMemos, it.plan_code, it["用途別_code"], it.item_seq)
+      : memosForRevenueItem(yearMemos, it.code, it.item_seq);
+    return `<tr><td>${esc(isExp ? it["說明"] : it.note || it.name)}${it.unresolved ? ' <span class="badge">⚠</span>' : ""}${memoBtn(itemMemos)}</td>
     <td class="hide-sm">${esc(it.unit)}</td><td class="num hide-sm">${esc(it.qty)}</td><td class="num hide-sm">${fmt(it.unit_price)}</td><td class="num">${fmt(it.amount_元)}</td>
-    ${isExp ? `<td class="hide-sm">${esc(it["經費來源"])}</td>` : ""}<td class="num">p${esc(it.page)}</td></tr>`);
+    ${isExp ? `<td class="hide-sm">${esc(it["經費來源"])}</td>` : ""}<td class="num">p${esc(it.page)}</td></tr>`;
+  });
   return `<div class="tablewrap"><table><thead><tr><th>${isExp ? "說明" : "說明／依據"}</th><th class="hide-sm">單位</th><th class="num hide-sm">數量</th><th class="num hide-sm">單價</th><th class="num">預算（元）</th>${isExp ? '<th class="hide-sm">經費來源</th>' : ""}<th class="num">頁碼</th></tr></thead><tbody>${rows.join("")}</tbody></table></div>`;
 }
 
@@ -335,17 +563,21 @@ function tokenize(text) {
   return out;
 }
 
-async function getSearch() {
+async function getSearch(index) {
   if (searchIndex) return searchIndex;
-  const docs = await loadJson("data/search.json");
+  const [docs, allMemos] = await Promise.all([
+    loadJson("data/search.json"),
+    getMemos(index),
+  ]);
+  const indexedDocs = mergeMemoAliases(docs, allMemos);
   const ms = new MiniSearch({
-    fields: ["name", "text", "code", "dept"],
+    fields: ["name", "text", "code", "dept", "alias"],
     storeFields: ["kind", "year", "code", "name", "text", "page", "page_start", "page_end", "amount_元", "dept", "unresolved", "用途別_code"],
     tokenize,
     searchOptions: { tokenize, combineWith: "AND", boost: { name: 2 } },
   });
-  ms.addAll(docs);
-  searchIndex = { ms, docs };
+  ms.addAll(indexedDocs);
+  searchIndex = { ms, docs: indexedDocs };
   return searchIndex;
 }
 
@@ -373,13 +605,13 @@ function getSearchCompareTarget(hit) {
   return { kind: null, code: null };
 }
 
-async function renderSearch(year, data, params, compare) {
+async function renderSearch(year, data, params, compare, index, yearMemos) {
   const q = (params.get("q") || "").trim();
   const kind = params.get("kind") || "";
   document.getElementById("q").value = q;
   $app.innerHTML = `<h1>搜尋${q ? "：" + esc(q) : ""}</h1><p class="muted">搜尋中…</p>`;
   if (!q) { $app.innerHTML = `<h1>搜尋</h1><p class="muted">請輸入關鍵字（名稱、說明或編號）。</p>`; return; }
-  const { ms } = await getSearch();
+  const { ms } = await getSearch(index);
   let hits = ms.search(q).filter((h) => String(h.year) === String(year));
   const kinds = { revenue: "歲入明細", expenditure: "歲出明細", plan: "工作計畫", summary: "總表" };
   const counts = {};
@@ -396,8 +628,9 @@ async function renderSearch(year, data, params, compare) {
     }
     const cmpTarget = getSearchCompareTarget(h);
     const cmpBtn = compareBtn(year, compare, cmpTarget.kind, cmpTarget.code);
+    const mBtn = memoBtn(memosForSearchDoc(yearMemos, h.id));
     const title = esc(h.name);
-    return `<div class="hit"><div class="t">${link ? `<a href="${esc(link)}">${title}</a>` : title} <span class="muted">${esc(kinds[h.kind] || h.kind)} ${esc(h.code)}</span>${h.unresolved ? ' <span class="badge">⚠ 未解決</span>' : ""}${cmpBtn}</div>
+    return `<div class="hit"><div class="t">${link ? `<a href="${esc(link)}">${title}</a>` : title} <span class="muted">${esc(kinds[h.kind] || h.kind)} ${esc(h.code)}</span>${h.unresolved ? ' <span class="badge">⚠ 未解決</span>' : ""}${cmpBtn}${mBtn}</div>
       <div class="note">${esc((h.text || "").slice(0, 140))}</div><div>${fmt(h.amount_元)} 元　${esc(pageText(h))}${h.dept ? "　" + esc(h.dept) : ""}</div></div>`;
   });
   $app.innerHTML = `<h1>搜尋：${esc(q)}</h1><div class="filters">${chips.join("")}</div>${list.join("") || '<p class="muted">沒有符合的結果。</p>'}${shown.length > 100 ? `<p class="note">只顯示前 100 筆，共 ${shown.length} 筆，請加上更多關鍵字。</p>` : ""}`;
@@ -410,7 +643,7 @@ function referenceNotFound(msg) {
   $app.innerHTML = `<p class="warn">找不到參考表：${esc(msg)}</p>`;
 }
 
-async function renderReference(year, params) {
+async function renderReference(year, params, yearMemos) {
   let ref;
   try {
     ref = await loadJson(`data/reference_${year}.json`);
@@ -448,21 +681,131 @@ async function renderReference(year, params) {
   t.cells.forEach((c) => { (byRow[c.r] = byRow[c.r] || []).push(c); });
   const body = [];
   for (let r = 0; r < t.rows; r++) {
-    const tds = (byRow[r] || []).sort((a, b) => a.c - b.c).map((c) =>
-      `<td${c.rs > 1 ? ` rowspan="${esc(c.rs)}"` : ""}${c.cs > 1 ? ` colspan="${esc(c.cs)}"` : ""}${c.v !== null && c.v !== undefined ? ' class="num"' : ""}>${esc(c.t)}</td>`
-    ).join("");
+    const tds = (byRow[r] || []).sort((a, b) => a.c - b.c).map((c) => {
+      const cellMemos = memosForRefCell(yearMemos, t.page, c.r, c.c);
+      const cls = [];
+      if (c.v !== null && c.v !== undefined) cls.push("num");
+      if (cellMemos.length) cls.push("has-memo");
+      return `<td${c.rs > 1 ? ` rowspan="${esc(c.rs)}"` : ""}${c.cs > 1 ? ` colspan="${esc(c.cs)}"` : ""}${cls.length ? ` class="${cls.join(" ")}"` : ""}>${esc(c.t)}${memoBtn(cellMemos)}</td>`;
+    }).join("");
     body.push(`<tr>${tds}</tr>`);
   }
+  const pageMemos = memosForRefPage(yearMemos, t.page);
   $app.innerHTML = `
     <h1>參考表</h1>
     <p class="note">這是預算書參考表的原樣呈現，儲存格內容依 OCR 轉檔，只套用 data/corrections.csv 登記過的修正；金額單位依各表標示。</p>
     <ul class="toc">${toc}</ul>
     <h2>${esc(t.source_table)}</h2>
-    <p>預算書第 ${esc(t.page)} 頁　單位：${t.unit ? esc(t.unit) : "單位請見原書該頁"}</p>
+    <p>預算書第 ${esc(t.page)} 頁　單位：${t.unit ? esc(t.unit) : "單位請見原書該頁"}${memoBtn(pageMemos)}</p>
     ${t.note ? `<p class="warn">${esc(t.note)}</p>` : ""}
     ${pager}
     <div class="tablewrap ref"><table class="reftable"><tbody>${body.join("")}</tbody></table></div>
     ${pager}`;
+}
+
+// ---------- 資料備註頁 ----------
+function memoLocationText(m) {
+  const t = m.target || {};
+  if (m.scope === "revenue_item") return `歲入明細 ${t.code || m.locator}${t.item_seq ? ` 第 ${t.item_seq} 筆` : ""}${m.field ? `（${m.field}）` : ""}`;
+  if (m.scope === "expenditure_item") return `歲出明細 ${t.plan_code || ""} / ${t["用途別_code"] || ""}${t.item_seq ? ` 第 ${t.item_seq} 筆` : ""}${m.field ? `（${m.field}）` : ""}`;
+  if (m.scope === "plan") return `工作計畫 ${t.plan_code || m.locator}${m.field ? `（${m.field}）` : ""}`;
+  if (m.scope === "summary") return `總表 ${t.source_table || ""} — ${t["科目名稱"] || ""}${m.field ? `（${m.field}）` : ""}`;
+  if (m.scope === "reference_cell") return `參考表 p${t.page ?? m.page} 第 ${t.row} 列第 ${t.col} 欄`;
+  if (m.scope === "page") return `整頁 p${t.page ?? m.page}`;
+  return m.locator || "";
+}
+
+function memoTargetLink(year, data, m) {
+  const t = m.target || {};
+  if (t.kind === "revenue" && t.code) {
+    const p = findPath(data.revenue.hierarchy, REV_LEVELS, t.code);
+    if (p) return href(year, "歲入", p);
+  } else if (t.kind === "expenditure" && t.plan_code) {
+    const p = findPath(data.expenditure.hierarchy, EXP_LEVELS, t.plan_code);
+    if (p) {
+      if (t["用途別_code"]) p["用途別"] = t["用途別_code"];
+      return href(year, "歲出", p);
+    }
+  } else if (t.kind === "plan" && t.plan_code) {
+    const p = findPath(data.expenditure.hierarchy, EXP_LEVELS, t.plan_code);
+    if (p) return href(year, "歲出", p);
+  } else if (t.kind === "summary" && t["科目名稱"]) {
+    return href(year, "搜尋", { q: t["科目名稱"], kind: "summary" });
+  } else if (t.kind === "reference" || t.kind === "page") {
+    return href(year, "參考表", { p: t.page ?? m.page });
+  }
+  return "";
+}
+
+function renderMemosPage(year, data, params, yearMemos) {
+  const intro = `<p class="note">本頁記錄預算書原件的印刷錯字、前後不一致、版面限制與資料缺口；資料本身依原書保留，不改動原書數字或原文。</p>`;
+  if (yearMemos === null) {
+    $app.innerHTML = `<h1>${esc(year)} 年度資料備註</h1>${intro}<p class="muted">備註資料無法載入。</p>`;
+    return;
+  }
+  const sorted = [...yearMemos].sort((a, b) => String(a.memo_id).localeCompare(String(b.memo_id)));
+  const typeFilter = (params.get("type") || "").trim();
+  const pageFilter = (params.get("p") || "").trim();
+
+  const typeCounts = {};
+  const pageCounts = {};
+  sorted.forEach((m) => {
+    typeCounts[m.type] = (typeCounts[m.type] || 0) + 1;
+    const pk = String(m.page);
+    pageCounts[pk] = (pageCounts[pk] || 0) + 1;
+  });
+
+  const mkFilterHref = (nextType, nextPage) => {
+    const p = {};
+    if (nextType) p.type = nextType;
+    if (nextPage) p.p = nextPage;
+    return href(year, "備註", p);
+  };
+
+  const typeChips = [`<a class="chip ${typeFilter ? "" : "on"}" href="${esc(mkFilterHref("", pageFilter))}">全部 ${sorted.length}</a>`]
+    .concat(
+      Object.keys(MEMO_TYPES)
+        .filter((k) => typeCounts[k])
+        .map((k) => `<a class="chip ${typeFilter === k ? "on" : ""}" href="${esc(mkFilterHref(k, pageFilter))}">${esc(MEMO_TYPES[k])} ${typeCounts[k]}</a>`)
+    );
+
+  const pages = Object.keys(pageCounts).sort((a, b) => Number(a) - Number(b));
+  const pageChips = [`<a class="chip ${pageFilter ? "" : "on"}" href="${esc(mkFilterHref(typeFilter, ""))}">全部頁碼</a>`]
+    .concat(
+      pages.map((pg) => `<a class="chip ${pageFilter === pg ? "on" : ""}" href="${esc(mkFilterHref(typeFilter, pg))}">p${esc(pg)} ${pageCounts[pg]}</a>`)
+    );
+
+  const shown = sorted.filter((m) => {
+    if (typeFilter && m.type !== typeFilter) return false;
+    if (pageFilter && String(m.page) !== pageFilter) return false;
+    return true;
+  });
+
+  const cards = shown.map((m) => {
+    const locText = memoLocationText(m);
+    const link = memoTargetLink(year, data, m);
+    const locHtml = link
+      ? `<a class="btn btn-sm" href="${esc(link)}">前往：${esc(locText)}</a>`
+      : `<span class="muted">${esc(locText)}</span>`;
+    return `<article class="memo-card" data-memo-id="${esc(m.memo_id)}">
+      <div class="memo-card-head">
+        <div class="memo-card-title">
+          <strong>${esc(m.memo_id)}</strong>
+          <span class="badge">${esc(MEMO_TYPES[m.type] || m.type)}</span>
+          <span class="muted">p${esc(m.page)}</span>
+        </div>
+        <div>${locHtml}</div>
+      </div>
+      ${renderMemoFields(m)}
+    </article>`;
+  }).join("");
+
+  $app.innerHTML = `
+    <h1>${esc(year)} 年度資料備註</h1>
+    ${intro}
+    <div class="memo-filter-group"><div class="filters">${typeChips.join("")}</div></div>
+    <div class="memo-filter-group"><div class="filters">${pageChips.join("")}</div></div>
+    ${cards || '<p class="muted">沒有符合的備註。</p>'}`;
 }
 
 // ---------- 跨年度比較 ----------
@@ -628,7 +971,10 @@ function renderCompare(year, data, params, compare, pair, defPair) {
       </table>
     </div>
     ${childrenSection}`;
-  $app.querySelectorAll("tr[data-to]").forEach((tr) => tr.addEventListener("click", () => { location.hash = tr.dataset.to; }));
+  $app.querySelectorAll("tr[data-to]").forEach((tr) => tr.addEventListener("click", (e) => {
+    if (e && e.target && typeof e.target.closest === "function" && e.target.closest(".memo-btn")) return;
+    location.hash = tr.dataset.to;
+  }));
 }
 
 function bindFind(year, data) {
@@ -639,6 +985,20 @@ function bindFind(year, data) {
       if (p) location.hash = href(year, "歲入", p);
     })
   );
+}
+
+$app.addEventListener("click", (e) => {
+  const btn = e && e.target && typeof e.target.closest === "function" ? e.target.closest(".memo-btn") : null;
+  if (!btn) return;
+  e.preventDefault();
+  e.stopPropagation();
+  openMemoPanel(btn.dataset.memo);
+});
+$app.addEventListener("error", handleEvidenceImgError, true);
+if (typeof document.addEventListener === "function") {
+  document.addEventListener("keydown", (e) => {
+    if (e && e.key === "Escape") closeMemoPanel();
+  });
 }
 
 document.getElementById("searchForm").addEventListener("submit", (e) => {

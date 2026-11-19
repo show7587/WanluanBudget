@@ -84,3 +84,53 @@ tr.click:hover td { background: var(--accent-soft); }
   th, td { padding: 7px 8px; }
   .chart { height: 300px; }
 }
+/* 資料備註 */
+.memo-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 24px; min-height: 24px; padding: 0 5px; margin-left: 4px;
+  border: 1px solid var(--accent); border-radius: 999px;
+  background: var(--accent-soft); color: var(--accent);
+  font: inherit; font-size: .82rem; font-weight: 700; line-height: 1;
+  cursor: pointer; vertical-align: middle;
+}
+.memo-btn:hover, .memo-btn:focus-visible { background: var(--accent); color: #fff; outline: 2px solid var(--accent); outline-offset: 1px; }
+.reftable td.has-memo { background: var(--accent-soft); }
+.memo-panel {
+  position: fixed; right: 20px; bottom: 20px; z-index: 30;
+  width: min(460px, calc(100vw - 32px)); max-height: 75vh; overflow-y: auto;
+  background: var(--card); color: var(--text); border: 1px solid var(--line);
+  border-radius: 12px; padding: 14px 16px; box-shadow: 0 8px 28px rgba(0, 0, 0, .18);
+}
+.memo-panel[hidden] { display: none; }
+.memo-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--line); margin-bottom: 10px; }
+.memo-panel-head h3 { margin: 0; font-size: 1rem; }
+.memo-close {
+  min-width: 32px; min-height: 32px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--bg); color: var(--text); font: inherit; cursor: pointer;
+}
+.memo-item + .memo-item { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.memo-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 6px; font-size: .88rem; }
+.memo-dl { margin: 6px 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: .9rem; }
+.memo-dl dt { color: var(--muted); white-space: nowrap; font-weight: 600; }
+.memo-dl dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.memo-code {
+  display: inline-block; padding: 2px 6px; border-radius: 6px;
+  background: var(--bg); border: 1px solid var(--line);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .88rem; white-space: pre-wrap; word-break: break-word;
+}
+.memo-evidence { margin-top: 8px; }
+.memo-evidence img { display: block; max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+.memo-evidence-path { margin-top: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .8rem; word-break: break-all; }
+.memo-card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin: 10px 0; }
+.memo-card-head { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.memo-card-title { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-weight: 600; }
+.memo-filter-group { margin: 6px 0; }
+@media (max-width: 640px) {
+  .memo-btn { min-width: 32px; min-height: 32px; font-size: .9rem; }
+  .memo-panel {
+    left: 0; right: 0; bottom: 0; width: 100%; max-width: 100vw; max-height: 70vh;
+    border-radius: 14px 14px 0 0; border-left: 0; border-right: 0; border-bottom: 0;
+  }
+  .memo-dl { grid-template-columns: 1fr; }
+}

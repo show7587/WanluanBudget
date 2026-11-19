@@ -31,7 +31,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from scripts.memos import check_memos_csv_integrity, load_memos
+from scripts.memos import load_memos, validate_memos, validate_memos_global
 
 
 def _parse_int(val: str | None, allow_empty: bool = False) -> int | None:
@@ -1440,14 +1440,37 @@ def _build_memos_data(
     summary_rows_by_year: dict[int, list[dict[str, Any]]],
     search_id_set: set[str],
     ref_cells_by_year: dict[int, set[tuple[int, int, int]]],
+    root_dir: Path | str | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], list[int]]:
-    """讀取 `data/memos.csv`，解析 target 並回傳 `(memos_json, sqlite_rows, memo_years)`。"""
+    """讀取 `data/memos.csv`，先套用與 validate.py 相同的檢查，再解析 target 並回傳 `(memos_json, sqlite_rows, memo_years)`。"""
     memos_path = data_path / "memos.csv"
-    integrity_errors = check_memos_csv_integrity(memos_path=memos_path)
-    if integrity_errors:
-        raise ValueError("; ".join(integrity_errors))
+    if not memos_path.is_file():
+        return {"years": {}}, [], []
+
+    if root_dir is not None:
+        effective_root = Path(root_dir)
+    else:
+        if data_path.name != "data":
+            raise ValueError(
+                f"偵測到 {memos_path}，但 data_dir 目錄名稱為 {data_path.name!r}（非 'data'）且未提供顯式 root_dir 參數"
+            )
+        effective_root = data_path.parent
+
+    global_errors = validate_memos_global(root_dir=effective_root)
+    if global_errors:
+        raise ValueError("備註全域驗證失敗：" + "; ".join(global_errors))
 
     raw_memos = load_memos(memos_path=memos_path)
+    memo_year_strs = sorted({(m.get("year") or "").strip() for m in raw_memos if (m.get("year") or "").strip()})
+    validation_failures: list[str] = []
+    for y_str in memo_year_strs:
+        val_res = validate_memos(y_str, root_dir=effective_root)
+        for item in val_res["results"]:
+            if not item["passed"]:
+                validation_failures.append(f"{item['memo_id']}: {'; '.join(item['errors'])}")
+    if validation_failures:
+        raise ValueError("備註驗證失敗：" + " | ".join(validation_failures))
+
     memos_by_year: dict[int, list[dict[str, Any]]] = defaultdict(list)
     sqlite_rows: list[dict[str, Any]] = []
 
@@ -1507,6 +1530,7 @@ def build(
     data_dir: Path | str = ROOT_DIR / "data",
     out_dir: Path | str = ROOT_DIR / "build",
     site_dir: Path | str = ROOT_DIR / "site" / "data",
+    root_dir: Path | str | None = None,
 ) -> dict[str, Any]:
     """掃描 `data_dir/<年度>/`，產生 `budget.sqlite` 與 `site_dir/*.json`。"""
     data_path = Path(data_dir)
@@ -1724,6 +1748,7 @@ def build(
             summary_rows_by_year=summary_rows_by_year,
             search_id_set=search_id_set,
             ref_cells_by_year=ref_cells_by_year,
+            root_dir=root_dir,
         )
         if memo_sqlite_rows:
             conn.executemany(

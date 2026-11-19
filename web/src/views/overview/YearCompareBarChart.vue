@@ -2,11 +2,11 @@
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import * as echarts from "echarts/core";
 import { BarChart } from "echarts/charts";
-import { GridComponent, LegendComponent, TooltipComponent } from "echarts/components";
+import { AriaComponent, GridComponent, LegendComponent, TooltipComponent } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 import { fmtCompact, fmtInt, fmtSignedYuan, fmtYuan } from "@/data/format";
 
-echarts.use([BarChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
+echarts.use([BarChart, AriaComponent, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
 
 export interface YearSummaryItem {
   year: number;
@@ -94,6 +94,8 @@ function buildOption(): echarts.EChartsCoreOption {
         );
       },
     },
+    // 歲入／歲出以斜線花紋區分，不只靠顏色
+    aria: { enabled: true, decal: { show: true } },
     legend: {
       top: 0,
       left: 0,

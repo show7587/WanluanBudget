@@ -90,8 +90,9 @@ function buildOption(): echarts.EChartsCoreOption {
   const span = Math.max(maxPos, maxNeg);
   const padRatio = narrow ? 1.0 : 0.42;
 
-  const axisMin = span === 0 ? -1 : maxNeg > 0 ? -Math.ceil(maxNeg * (1 + padRatio)) : 0;
-  const axisMax = span === 0 ? 1 : maxPos > 0 ? Math.ceil(maxPos * (1 + padRatio)) : 0;
+  // 負值標籤放在零線右側，所以右側至少要留 padRatio 的空間給它們
+  const axisMin = span === 0 ? -1 : maxNeg > 0 ? -Math.ceil(maxNeg * 1.05) : 0;
+  const axisMax = span === 0 ? 1 : Math.ceil(Math.max(maxPos, span * 0.5) * (1 + padRatio));
 
   const categories = props.nodes.map((n) => n.name);
   const data = props.nodes.map((n) => {
@@ -109,7 +110,8 @@ function buildOption(): echarts.EChartsCoreOption {
       },
       label: {
         show: true,
-        position: val >= 0 ? "right" : "left",
+        // 負值長條的標籤也放在零線右側（該列右側是空的），避免蓋到左邊的類別軸文字
+        position: "right",
         distance: 6,
         color: textColor,
         fontSize: narrow ? 11 : 12,

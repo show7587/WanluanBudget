@@ -246,8 +246,8 @@ const entryLinks = computed(() => {
             <span>歲入 <strong class="num">{{ fmtYuan(data.overview.current_account.revenue_元) }}</strong></span>
             <span>歲出 <strong class="num">{{ fmtYuan(data.overview.current_account.expenditure_元) }}</strong></span>
             <span>
-              經常收支賸餘
-              <strong class="num">▲ {{ fmtYuan(data.overview.current_account.surplus_元) }}</strong>
+              {{ data.overview.current_account.surplus_元 >= 0 ? "經常收支賸餘" : "經常收支短絀" }}
+              <strong class="num"><span aria-hidden="true">{{ data.overview.current_account.surplus_元 >= 0 ? "▲" : "▼" }}</span> {{ fmtYuan(Math.abs(data.overview.current_account.surplus_元)) }}</strong>
             </span>
           </div>
         </div>
@@ -257,8 +257,8 @@ const entryLinks = computed(() => {
             <span>歲入 <strong class="num">{{ fmtYuan(data.overview.capital_account.revenue_元) }}</strong></span>
             <span>歲出 <strong class="num">{{ fmtYuan(data.overview.capital_account.expenditure_元) }}</strong></span>
             <span>
-              資本收支短絀
-              <strong class="num">▼ {{ fmtYuan(data.overview.capital_account.shortfall_元) }}</strong>
+              {{ data.overview.capital_account.shortfall_元 >= 0 ? "資本收支短絀" : "資本收支賸餘" }}
+              <strong class="num"><span aria-hidden="true">{{ data.overview.capital_account.shortfall_元 >= 0 ? "▼" : "▲" }}</span> {{ fmtYuan(Math.abs(data.overview.capital_account.shortfall_元)) }}</strong>
             </span>
           </div>
         </div>

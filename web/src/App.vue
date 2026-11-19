@@ -27,7 +27,7 @@ const nav = [
 function changeYear(e: Event): void {
   const y = (e.target as HTMLSelectElement).value;
   // 換年度時保留頁面，清掉 drill-down 路徑（節點 id 不一定跨年度存在）
-  void router.push({ path: `/${y}/${String(route.path.split("/")[2] ?? "總覽")}`, query: { ...route.query, path: undefined } });
+  void router.push({ path: `/${y}/${String(route.path.split("/")[2] ?? "總覽")}`, query: { ...route.query, path: undefined, filter: undefined } });
 }
 
 const legacyHref = computed(() => `legacy/index.html#/${year.value || ""}`);

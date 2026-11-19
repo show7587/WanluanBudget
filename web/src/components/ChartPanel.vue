@@ -48,7 +48,8 @@ function exportAs(kind: "csv" | "json"): void {
 </template>
 
 <style scoped>
-.panel { display: grid; gap: 12px; }
+.panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.panel > * { min-width: 0; }
 .head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: flex-start; }
 .title { font-size: var(--fs-lg); }
 .sub { margin: 2px 0 0; font-size: var(--fs-sm); }

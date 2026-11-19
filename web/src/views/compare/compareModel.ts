@@ -70,7 +70,8 @@ function entryToNode(entry: CompareEntry, fromKey: string, toKey: string): TreeN
   const { amount, prev, diff, pct, status } = resolveDiff(rawPrev, rawCur);
   return {
     id: entry.key,
-    name: entry.display_name,
+    // 工作計畫有同名者（例如「一般行政-行政管理」），加上代碼末 5 碼以便區分
+    name: entry.kind === "plan" ? `${entry.display_name}（${entry.code.slice(-5)}）` : entry.display_name,
     level: entry.level,
     code: entry.code,
     amount,

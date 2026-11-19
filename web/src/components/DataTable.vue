@@ -18,7 +18,7 @@ const share = (n: TreeNode): string => fmtPct(total.value ? (n.amount / total.va
 </script>
 
 <template>
-  <div class="table-wrap">
+  <div class="table-wrap" tabindex="0" role="region" :aria-label="`${caption}（可捲動資料表）`">
     <table class="data">
       <caption>{{ caption }}（金額單位：元）</caption>
       <thead>

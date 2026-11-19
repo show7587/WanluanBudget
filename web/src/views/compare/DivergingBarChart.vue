@@ -88,7 +88,7 @@ function buildOption(): echarts.EChartsCoreOption {
   const maxPos = Math.max(0, ...diffs);
   const maxNeg = Math.max(0, ...diffs.map((d) => -d));
   const span = Math.max(maxPos, maxNeg);
-  const padRatio = narrow ? 0.52 : 0.42;
+  const padRatio = narrow ? 1.0 : 0.42;
 
   const axisMin = span === 0 ? -1 : maxNeg > 0 ? -Math.ceil(maxNeg * (1 + padRatio)) : 0;
   const axisMax = span === 0 ? 1 : maxPos > 0 ? Math.ceil(maxPos * (1 + padRatio)) : 0;
@@ -103,6 +103,8 @@ function buildOption(): echarts.EChartsCoreOption {
       node: n,
       itemStyle: {
         color: fill,
+        borderColor: css("--text-muted"),
+        borderWidth: 1,
         borderRadius: val >= 0 ? [0, 4, 4, 0] : [4, 0, 0, 4],
       },
       label: {

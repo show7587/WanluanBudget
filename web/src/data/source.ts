@@ -15,12 +15,18 @@ export function createHttpSource(base = import.meta.env?.VITE_DATA_BASE ?? "data
     if (!cache.has(path)) {
       cache.set(
         path,
-        fetch(`${base}${path}`).then((r) => {
+        fetch(`${base}${path}`).then(async (r) => {
           if (!r.ok) {
             if (optional && r.status === 404) return null;
             throw new Error(`載入 ${path} 失敗（HTTP ${r.status}）`);
           }
-          return r.json();
+          try {
+            return await r.json();
+          } catch {
+            // 某些伺服器（含 vite dev）對不存在的檔案回傳 index.html（HTTP 200）；選用資料視為不存在
+            if (optional) return null;
+            throw new Error(`載入 ${path} 失敗（內容不是 JSON）`);
+          }
         }),
       );
     }
@@ -30,6 +36,9 @@ export function createHttpSource(base = import.meta.env?.VITE_DATA_BASE ?? "data
     index: () => get<IndexData>("index.json") as Promise<IndexData>,
     year: (y) => get<YearData>(`${y}.json`) as Promise<YearData>,
     async compareTo(toYear) {
+      // 先看 index：沒有上一年度就不必請求比較檔
+      const idx = (await get<IndexData>("index.json")) as IndexData;
+      if (!idx.years.includes(toYear - 1)) return null;
       const c = await get<CompareData>(`compare_${toYear - 1}_${toYear}.json`, true);
       return c && c.to_year === toYear ? c : null;
     },

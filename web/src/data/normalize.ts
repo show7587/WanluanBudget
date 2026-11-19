@@ -37,8 +37,8 @@ function entryPrev(entry: CompareEntry | undefined, ctx: Ctx): { prev: number | 
   if (!entry || !ctx.compare) return { prev: null, isNew: false };
   const from = String(ctx.compare.from_year);
   const to = String(ctx.compare.to_year);
-  const hasPrev = entry.amount_元[from] !== undefined;
-  const hasCur = entry.amount_元[to] !== undefined;
+  const hasPrev = typeof entry.amount_元[from] === "number";
+  const hasCur = typeof entry.amount_元[to] === "number";
   if (hasCur && !hasPrev) return { prev: null, isNew: true };
   return { prev: hasPrev ? entry.amount_元[from] : null, isNew: false };
 }

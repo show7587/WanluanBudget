@@ -1,4 +1,5 @@
 build/budget.sqlite
+site/evidence/
 __pycache__/
 
 # 掃描檔來源與轉圖（體積大，可由 PDF 重新產生）

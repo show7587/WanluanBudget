@@ -24,6 +24,8 @@
 | `reference_tables.csv`（僅 114） | 預算書最後的參考表（各機關用途別分析、人事費彙計、公務車輛明細等）的儲存格資料 |
 | `crosswalk/codes.csv` | 跨年度科目／計畫編號對照（預算書改編號時使用） |
 | `corrections.csv` | 人工修正 OCR 的登記表，每一筆都附依據 |
+| `memos.csv` | 資料備註表：如實記錄原書印刷錯字、前後不一致、版面限制與資料缺口，附 PDF 頁序與證據截圖 |
+| `pdf_sources.csv` | 已核對之各年度 PDF 檔內頁序與書面頁碼對照區段 |
 
 各年度資料放在 `data/<年度>/`。OCR 原文放在 `raw/<年度>/`，**永遠不修改**。
 
@@ -32,8 +34,9 @@
 - **總覽**：收支簡明、歲入來源別與歲出政事別、經常門與資本門比例。
 - **歲出／歲入瀏覽**：政事別 → 機關 → 工作計畫 → 用途別 → 明細逐層展開，每一列都標示預算書頁碼；篩選條件放在 URL，可以直接分享連結。
 - **比較**：相鄰年度（114 vs 115、115 vs 116）在款、項、細目、計畫等層級的金額增減與增減百分比；只出現在其中一年的項目會標示「僅 115」之類的標籤。
-- **搜尋**：跨年度搜尋說明、名稱與編號，可依年度與歲入／歲出篩選。
+- **搜尋**：跨年度搜尋說明、名稱與編號，可依年度與歲入／歲出篩選；原書錯字備註的建議寫法也會併入搜尋別名，輸入正確寫法同樣查得到。
 - **參考表**（僅 114）：依原書頁碼瀏覽 p154–p173 的參考表。
+- **資料備註**：有備註的明細列、工作計畫、搜尋結果與參考表儲存格旁顯示 `ⓘ` 標記，點開可查看原書印刷、目前資料值、建議寫法、來源 PDF 頁序與證據截圖；亦可至「資料備註」頁依類型與頁碼篩選並連回對應畫面。
 - 手機寬度可正常使用。
 
 ## 快速開始
@@ -73,12 +76,14 @@ sqlite3 build/budget.sqlite "select page, amount_元 from revenue_items where co
 raw/<年度>/              OCR 原文（唯讀，永不修改）
 data/<年度>/             正規化 CSV（source of truth）
 data/corrections.csv     OCR 修正登記表
+data/memos.csv           資料備註表（原書錯字、不一致、版面限制與資料缺口）
+data/pdf_sources.csv     PDF 頁序與書面頁碼對照表
 data/crosswalk/          跨年度代碼對照
-scripts/                 parse_book.py / validate.py / build.py / match_items.py
+scripts/                 parse_book.py / validate.py / build.py / memos.py / match_items.py
 reports/                 validate_<年度>.md 驗證報告
 site/                    純靜態網站（index.html、app.js、style.css、data/）
 tests/                   unittest
-docs/                    PLAN.md（原始規格）、TODO.md（已知問題與待辦）
+docs/                    PLAN.md（原始規格）、TODO.md（已知問題與待辦）、MEMOS.md、evidence/（證據截圖）
 .github/workflows/       pages.yml（push 到 main 自動部署）
 ```
 

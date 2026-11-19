@@ -23,6 +23,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+      - name: 複製證據圖到網站
+        run: cp -r docs/evidence site/evidence
       - uses: actions/upload-pages-artifact@v3
         with:
           path: ./site

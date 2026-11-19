@@ -47,9 +47,9 @@ site/（純靜態）→ GitHub Pages（.github/workflows/pages.yml，push 到 ma
 
 - **Python 3.14，只用標準函式庫**（`html.parser`、`csv`、`sqlite3`、`difflib`、`argparse`、`unittest`）。不要引入 pandas、BeautifulSoup 等套件。
 - **前端是原生 JS（ES module），沒有 build 步驟**。圖表用 ECharts 5.5.1、搜尋用 MiniSearch 7.1.0，由 CDN 載入並鎖定版本（見 `site/index.html`）。
-- 前端路由用 URL hash：`#/<年>/<總覽|歲出|歲入|比較|搜尋|參考表>?<參數>`；`參考表` 只有 114 顯示（`index.json` 的 `reference_years`）。比較頁依檢視年度挑相鄰年度對：(Y, Y+1) 存在就用，否則 (Y-1, Y)；`compare.json` 等於最新一對。
-- 檔案分工：`parse_book.py`（約 1,650 行，解析與修正套用）、`validate.py`（驗證與報告）、`build.py`（SQLite 與網站 JSON、參考表、比較）、`site/app.js`（路由與畫面）。
-- SQLite 表：`summary`、`revenue_items`、`plans`、`expenditure_items`、`crosswalk_codes`、`crosswalk_items`、`crosswalk_items_candidates`；有「未解決」旗標欄位（`unresolved*`），來源是 `corrections.csv` 中 `field=_known_diff` 且 `new=UNRESOLVED` 的列（機制存在，**目前沒有登記任何一筆**）。
+- 前端路由用 URL hash：`#/<年>/<總覽|歲出|歲入|比較|搜尋|參考表|備註>?<參數>`；`參考表` 只有 114 顯示（`index.json` 的 `reference_years`），`備註` 只在 `index.json` 的 `memo_years` 含該年度時顯示。比較頁依檢視年度挑相鄰年度對：(Y, Y+1) 存在就用，否則 (Y-1, Y)；`compare.json` 等於最新一對。
+- 檔案分工：`parse_book.py`（約 1,650 行，解析與修正套用）、`memos.py`（備註表與 PDF 頁碼對照的載入、定位與驗證）、`validate.py`（驗證與報告）、`build.py`（SQLite 與網站 JSON、參考表、比較、備註）、`site/app.js`（路由與畫面）。
+- SQLite 表：`summary`、`revenue_items`、`plans`、`expenditure_items`、`crosswalk_codes`、`crosswalk_items`、`crosswalk_items_candidates`、`memos`；有「未解決」旗標欄位（`unresolved*`），來源是 `corrections.csv` 中 `field=_known_diff` 且 `new=UNRESOLVED` 的列（機制存在，**目前沒有登記任何一筆**）。
 
 ### CSV 欄位
 
@@ -79,6 +79,18 @@ site/（純靜態）→ GitHub Pages（.github/workflows/pages.yml，push 到 ma
 - 欄位值可用 `||` 把一列拆成多列。
 - 修正筆數：`parse_book.py` 會印出套用／未套用／未登記異常；三者要分別是 N／0／0。
 
+## 備註表（資料備註）
+
+如實記錄預算書原件的印刷錯字、前後不一致、版面限制與資料缺口，同時維持 CSV 數字與原書文字不變（完整欄位與規則見 `docs/MEMOS.md`）。
+
+- **檔案**：`data/memos.csv`（17 欄：`memo_id,year,scope,page,locator,field,type,printed_text,data_text,suggested_text,note,pdf_file,pdf_page,verified_method,verified_on,evidence,status`）、`data/pdf_sources.csv`（已核對的書面頁碼與 PDF 頁序對照）、`docs/evidence/<年>/<memo_id>.png`（裁切灰階證據截圖，進版控）。
+- **型別**：`scope` ∈ `revenue_item`｜`expenditure_item`｜`plan`｜`summary`｜`reference_cell`｜`page`；`type` ∈ `print_typo`｜`print_inconsistent`｜`print_layout`｜`data_gap`；`status` ∈ `confirmed`｜`pending_publisher`。
+- **驗證規則**：`scripts/memos.py` 的 `validate_memos_global` 與 `validate_memos(<年>)` 檢查 CSV 完整性、年度目錄存在與 V1–V7（唯一 ID、locator 恰好命中 1 列且頁碼相符、`data_text` 逐字 guard、`print_typo` 必填且不同的 `printed_text`/`suggested_text`、`pdf_sources.csv` 頁碼偏移、安全的 `docs/evidence/` 路徑且檔案存在、合法日期）。`validate.py` 與 `build.py` 共用同一組檢查，任一失敗皆中止且 `build.py` 不寫出 `memos.json`。
+- **建置輸出**：`site/data/memos.json`（依年度分組、帶解析後的 `target`）、SQLite `memos` 表、`site/data/index.json` 的 `memo_years`。
+- **前端行為**：依 `index.memo_years` 載入 `data/memos.json`（載入失敗快取為 `null`、優雅降級）；各畫面有備註的項目顯示 `ⓘ` 按鈕開啟共用詳情面板；備註頁 `#/<年>/備註` 支援 `type` 與 `p` 篩選與連回對應畫面；搜尋索引僅將 `print_typo` 的 `suggested_text` 併入 `alias` 欄位（避免其他類型的說明文字污染搜尋）。
+- **證據圖部署與本機預覽**：CI（`.github/workflows/pages.yml`）在打包前執行 `cp -r docs/evidence site/evidence`，不把圖片 commit 進 `site/`；`site/evidence/` 已加入 `.gitignore`。本機預覽若要看到證據圖可先執行 `cp -r docs/evidence site/evidence`，未複製時前端自動降級只顯示路徑文字。
+- **新增／修改備註的標準作法**：先對照 PDF 原圖並視需要存證據圖 → 更新 `data/memos.csv`（必要時先補已核對的 `data/pdf_sources.csv`）→ 必跑 `python3 scripts/validate.py <年> [--partial]`、`python3 scripts/build.py`、`python3 -m unittest discover -s tests`。
+
 ## 驗證（validate.py）檢查什麼
 
 歲入：細目明細加總 = 區塊表頭預算金額；細目 → 子目 → 項 → 款 → 總計與 part1 的歲入來源別總表一致。
@@ -89,9 +101,9 @@ site/（純靜態）→ GitHub Pages（.github/workflows/pages.yml，push 到 ma
 驗證輸出的基準（目前）：
 
 ```
-114 --partial：歲出計畫 50/50、用途別 291/291、機關別 2/2、跨表衝突 2
-115          ：48/48、300/300、2/2、衝突 0
-116          ：49/49、296/296、2/2、衝突 2
+114 --partial：歲出計畫 50/50、用途別 291/291、機關別 2/2、跨表衝突 2、備註 20/20
+115          ：48/48、300/300、2/2、衝突 0、備註 5/5
+116          ：49/49、296/296、2/2、衝突 2、備註 3/3
 ```
 
 報告裡「失敗 **0**」這類統計字樣本身也含「失敗」二字，判斷要看表格列，不要只 grep。
@@ -149,12 +161,12 @@ python3 -m unittest discover -s tests          # 約 70 個；tests/test_fronten
 
 ```
 raw/<年>/                 OCR 原文（唯讀）；115 另有 ocr_exp/ ocr_rev/ toc.md original/
-data/<年>/                CSV；data/corrections.csv；data/crosswalk/codes.csv
-scripts/                  parse_book.py  validate.py  build.py  match_items.py
+data/<年>/                CSV；data/corrections.csv；data/memos.csv；data/pdf_sources.csv；data/crosswalk/codes.csv
+scripts/                  parse_book.py  validate.py  build.py  memos.py  match_items.py
 reports/                  validate_<年>.md（由 validate.py 產生，會進 git）
-site/                     index.html  app.js  style.css  data/*.json（由 build.py 產生，會進 git）
+site/                     index.html  app.js  style.css  data/*.json（由 build.py 產生，會進 git）；site/evidence/（gitignore）
 build/budget.sqlite       本機 SQLite（gitignore）
-tests/                    test_s1/s2/s3、test_build、test_compare、test_frontend、test_validate_agency；fixtures/
-docs/                     PLAN.md  TODO.md
+tests/                    test_s1/s2/s3、test_build、test_compare、test_frontend、test_memos*、test_validate_agency；fixtures/
+docs/                     PLAN.md  TODO.md  MEMOS.md  evidence/<年>/*.png
 議事記錄_依科室分類.md    鄉民代表會議事記錄筆記，與預算資料庫無關
 ```

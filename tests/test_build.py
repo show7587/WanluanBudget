@@ -394,6 +394,10 @@ class TestReferenceTables(unittest.TestCase):
                 self.assertIn("黏連", t["note"])
                 self.assertIn("243", t["note"])
                 self.assertIn("24", t["note"])
+                # p165 有問題，p166–p168 已對照原書未發現問題；不可再寫成「尚未對照」
+                self.assertIn("p165", t["note"])
+                self.assertIn("p166–p168 已對照原書", t["note"])
+                self.assertNotIn("尚未", t["note"])
             else:
                 self.assertNotIn("note", t, t["page"])
 

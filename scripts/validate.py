@@ -602,6 +602,63 @@ def validate_year(year: str, root_dir: Path = ROOT_DIR, partial: bool = False) -
         total_exp_detail - expected_exp_grand_total_yuan, all_diff_exp_plans
     )
 
+    # Expenditure agency check against part1 歲出機關別預算比較總表
+    agency_exp_table = [
+        r for r in summary_rows if r["source_table"] == "歲出機關別預算比較總表"
+    ]
+    agency_specs = [
+        (
+            "代表會主管",
+            "dept == '鄉民代表會'",
+            [r for r in plans_rows if r["dept"] == "鄉民代表會"],
+        ),
+        (
+            "統籌支撥科目",
+            "政事別 in ('退休撫卹支出', '補助及其他支出')",
+            [r for r in plans_rows if r["政事別"] in ("退休撫卹支出", "補助及其他支出")],
+        ),
+    ]
+    expenditure_agency_checks: list[dict[str, Any]] = []
+    for subj, filter_desc, matching_plans in agency_specs:
+        row = next((r for r in agency_exp_table if r["科目名稱"] == subj), None)
+        target_yuan: int | None = None
+        if row is not None:
+            t_val, t_ok = parse_single_amount(row["本年度"], allow_empty=False)
+            if t_ok and t_val is not None:
+                target_yuan = t_val
+        summary_page = int(row["page"]) if row is not None and row["page"].strip() else None
+        kuan = row["款"] if row is not None else ""
+
+        plans_sum_yuan = 0
+        for p in matching_plans:
+            p_val, p_ok = parse_single_amount(p["總額"], allow_empty=False)
+            if p_ok and p_val is not None:
+                plans_sum_yuan += p_val
+
+        passed = (target_yuan is not None) and (plans_sum_yuan == target_yuan)
+        diff_yuan = (plans_sum_yuan - target_yuan) if target_yuan is not None else None
+        if passed:
+            status = "通過"
+        elif target_yuan is None:
+            status = "失敗（總表缺少科目）"
+        else:
+            status = f"失敗（差額 {fmt_yuan(diff_yuan)} 元）"
+
+        expenditure_agency_checks.append(
+            {
+                "款": kuan,
+                "科目名稱": subj,
+                "summary_page": summary_page,
+                "plans_filter": filter_desc,
+                "plan_count": len(matching_plans),
+                "target_元": target_yuan,
+                "plans_sum_元": plans_sum_yuan,
+                "diff_元": diff_yuan,
+                "passed": passed,
+                "status": status,
+            }
+        )
+
     # 4. Cross-table conflict detection in summary.csv
     subj_field_records: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for r in summary_rows:
@@ -879,6 +936,23 @@ def validate_year(year: str, root_dir: Path = ROOT_DIR, partial: bool = False) -
     )
     lines.append("")
 
+    lines.append("## 8. 歲出機關別核對（對照 part1 歲出機關別預算比較總表）")
+    lines.append("")
+    lines.append(
+        "| 款 | 機關別科目 | 總表頁碼 | 對應 plans.csv 範圍 | 計畫數 | 總表金額 (元) | plans.csv 加總 (元) | 差額 (元) | 核對結果 |"
+    )
+    lines.append("|---|---|---|---|---:|---:|---:|---:|---|")
+    for eac in expenditure_agency_checks:
+        page_str = f"p{eac['summary_page']}" if eac["summary_page"] is not None else "-"
+        target_str = fmt_yuan(eac["target_元"]) if eac["target_元"] is not None else "-"
+        diff_str = fmt_yuan(eac["diff_元"]) if eac["diff_元"] is not None else "-"
+        lines.append(
+            f"| {eac['款'] or '-'} | {eac['科目名稱']} | {page_str} | {eac['plans_filter']} | "
+            f"{eac['plan_count']} | {target_str} | {fmt_yuan(eac['plans_sum_元'])} | "
+            f"{diff_str} | {eac['status']} |"
+        )
+    lines.append("")
+
     report_path.write_text("\n".join(lines), encoding="utf-8")
 
     return {
@@ -909,6 +983,7 @@ def validate_year(year: str, root_dir: Path = ROOT_DIR, partial: bool = False) -
         "total_exp_plan_yuan": total_exp_plan,
         "total_exp_use_yuan": total_exp_use,
         "total_exp_detail_yuan": total_exp_detail,
+        "expenditure_agency_checks": expenditure_agency_checks,
         "summary_conflicts": summary_conflicts,
     }
 
@@ -927,6 +1002,7 @@ def main(argv: list[str] | None = None) -> int:
     failed_fine_items = [c for c in res["fine_item_checks"] if c["failed"]]
     failed_exp_uses = [c for c in res["expenditure_use_checks"] if c["failed"]]
     failed_exp_plans = [c for c in res["expenditure_plan_checks"] if c["failed"]]
+    failed_agency_checks = [c for c in res["expenditure_agency_checks"] if not c["passed"]]
     print(
         f"[{year}年度] 驗證報告已寫入 {res['report_path']}："
         f"未登記數字異常 {unreg_count} 筆、"
@@ -934,6 +1010,7 @@ def main(argv: list[str] | None = None) -> int:
         f"歲入未解決細目 {len(res['unresolved_items'])} 項、"
         f"歲出計畫通過 {sum(1 for p in res['expenditure_plan_checks'] if p['passed'])}/{len(res['expenditure_plan_checks'])}、"
         f"歲出用途別通過 {sum(1 for u in res['expenditure_use_checks'] if u['passed'])}/{len(res['expenditure_use_checks'])}、"
+        f"機關別核對通過 {sum(1 for a in res['expenditure_agency_checks'] if a['passed'])}/{len(res['expenditure_agency_checks'])}、"
         f"跨表衝突 {len(res['summary_conflicts'])} 項。"
     )
     if (
@@ -942,6 +1019,7 @@ def main(argv: list[str] | None = None) -> int:
         or failed_fine_items
         or failed_exp_uses
         or failed_exp_plans
+        or failed_agency_checks
     ):
         return 1
     return 0

@@ -82,9 +82,60 @@ def load_pdf_sources(root_dir: Path = ROOT_DIR) -> list[dict[str, str]]:
     return _read_csv_rows(root_dir / "data" / "pdf_sources.csv")
 
 
-def load_memos(root_dir: Path = ROOT_DIR) -> list[dict[str, str]]:
+def load_memos(
+    root_dir: Path = ROOT_DIR,
+    memos_path: Path | None = None,
+) -> list[dict[str, str]]:
     """Load data/memos.csv rows."""
-    return _read_csv_rows(root_dir / "data" / "memos.csv")
+    return _read_csv_rows(memos_path if memos_path is not None else root_dir / "data" / "memos.csv")
+
+
+def check_memos_csv_integrity(
+    root_dir: Path = ROOT_DIR,
+    memos_path: Path | None = None,
+) -> list[str]:
+    """Check that memos.csv has all required columns and matching column counts per row."""
+    path = memos_path if memos_path is not None else root_dir / "data" / "memos.csv"
+    if not path.is_file():
+        return []
+    errors: list[str] = []
+    with path.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.reader(f)
+        try:
+            header = next(reader)
+        except StopIteration:
+            return ["data/memos.csv 為空檔案，缺少表頭"]
+        missing = [col for col in MEMO_COLUMNS if col not in header]
+        if missing:
+            errors.append(f"data/memos.csv 缺少必要欄位：{', '.join(missing)}")
+        expected_len = len(header)
+        for line_no, row in enumerate(reader, start=2):
+            if len(row) != expected_len:
+                errors.append(
+                    f"data/memos.csv 第 {line_no} 列欄位數不符（表頭 {expected_len} 欄，實際 {len(row)} 欄）"
+                )
+    return errors
+
+
+def validate_memos_global(root_dir: Path = ROOT_DIR) -> list[str]:
+    """Cross-year checks on data/memos.csv: schema integrity and valid data/<year>/ directories."""
+    errors = check_memos_csv_integrity(root_dir=root_dir)
+    if errors:
+        return errors
+
+    data_dir = root_dir / "data"
+    valid_years: set[str] = set()
+    if data_dir.is_dir():
+        for child in data_dir.iterdir():
+            if child.is_dir() and child.name.isdigit():
+                valid_years.add(child.name)
+
+    for idx, m in enumerate(load_memos(root_dir=root_dir), start=2):
+        y = (m.get("year") or "").strip()
+        mid = (m.get("memo_id") or "").strip() or f"第 {idx} 列"
+        if not y or not y.isdigit() or y not in valid_years:
+            errors.append(f"備註 {mid} 的 year={y!r} 無對應資料年度目錄（data/{y}/ 不存在）")
+    return errors
 
 
 def find_pdf_source(
@@ -259,22 +310,22 @@ def validate_memos(year: str, root_dir: Path = ROOT_DIR) -> dict[str, Any]:
 
     for m in year_memos:
         errors: list[str] = []
-        memo_id = m.get("memo_id", "").strip()
-        scope = m.get("scope", "").strip()
-        page_raw = m.get("page", "").strip()
-        locator = m.get("locator", "")
-        field = m.get("field", "").strip()
-        m_type = m.get("type", "").strip()
-        printed_text = m.get("printed_text", "")
-        data_text = m.get("data_text", "")
-        suggested_text = m.get("suggested_text", "")
-        note = m.get("note", "").strip()
-        pdf_file = m.get("pdf_file", "").strip()
-        pdf_page_raw = m.get("pdf_page", "").strip()
-        verified_method = m.get("verified_method", "").strip()
-        verified_on = m.get("verified_on", "").strip()
-        evidence = m.get("evidence", "").strip()
-        status = m.get("status", "").strip()
+        memo_id = (m.get("memo_id") or "").strip()
+        scope = (m.get("scope") or "").strip()
+        page_raw = (m.get("page") or "").strip()
+        locator = m.get("locator") or ""
+        field = (m.get("field") or "").strip()
+        m_type = (m.get("type") or "").strip()
+        printed_text = m.get("printed_text") or ""
+        data_text = m.get("data_text") or ""
+        suggested_text = m.get("suggested_text") or ""
+        note = (m.get("note") or "").strip()
+        pdf_file = (m.get("pdf_file") or "").strip()
+        pdf_page_raw = (m.get("pdf_page") or "").strip()
+        verified_method = (m.get("verified_method") or "").strip()
+        verified_on = (m.get("verified_on") or "").strip()
+        evidence = (m.get("evidence") or "").strip()
+        status = (m.get("status") or "").strip()
 
         # V1: 欄位與列舉值合法、memo_id 唯一
         if not memo_id:
@@ -363,9 +414,17 @@ def validate_memos(year: str, root_dir: Path = ROOT_DIR) -> dict[str, Any]:
                             f"V5: pdf_page={pdf_page_int} 與對照表推算（{page_int} + {src['pdf_page_offset']} = {expected_pdf_page}）不符"
                         )
 
-        # V6: evidence 若有值，檔案必須存在
-        if evidence and not (root_dir / evidence).is_file():
-            errors.append(f"V6: evidence 檔案不存在：{evidence}")
+        # V6: evidence 若有值，必須為 docs/evidence/ 相對路徑、不含 ..、且檔案必須存在
+        if evidence:
+            norm_ev = evidence.replace("\\", "/")
+            if Path(evidence).is_absolute() or norm_ev.startswith("/"):
+                errors.append(f"V6: evidence 不可為絕對路徑：{evidence}")
+            elif ".." in norm_ev.split("/"):
+                errors.append(f"V6: evidence 路徑不可含 '..'：{evidence}")
+            elif not norm_ev.startswith("docs/evidence/"):
+                errors.append(f"V6: evidence 路徑必須以 'docs/evidence/' 開頭：{evidence}")
+            elif not (root_dir / evidence).is_file():
+                errors.append(f"V6: evidence 檔案不存在：{evidence}")
 
         # V7: verified_on 為合法 YYYY-MM-DD 日期
         if not re.match(r"^\d{4}-\d{2}-\d{2}$", verified_on):

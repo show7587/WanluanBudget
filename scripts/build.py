@@ -23,10 +23,15 @@ import json
 import re
 from pathlib import Path
 import sqlite3
+import sys
 from typing import Any
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from scripts.memos import check_memos_csv_integrity, load_memos
 
 
 def _parse_int(val: str | None, allow_empty: bool = False) -> int | None:
@@ -186,6 +191,28 @@ def _init_sqlite_schema(conn: sqlite3.Connection) -> None:
             to_text TEXT NOT NULL
         );
 
+        CREATE TABLE memos (
+            memo_id TEXT PRIMARY KEY,
+            year INTEGER NOT NULL,
+            scope TEXT NOT NULL,
+            page INTEGER NOT NULL,
+            locator TEXT NOT NULL,
+            field TEXT NOT NULL,
+            type TEXT NOT NULL,
+            printed_text TEXT NOT NULL,
+            data_text TEXT NOT NULL,
+            suggested_text TEXT NOT NULL,
+            note TEXT NOT NULL,
+            pdf_file TEXT NOT NULL,
+            pdf_page INTEGER NOT NULL,
+            verified_method TEXT NOT NULL,
+            verified_on TEXT NOT NULL,
+            evidence TEXT NOT NULL,
+            status TEXT NOT NULL,
+            target_kind TEXT NOT NULL,
+            target_search_id TEXT
+        );
+
         CREATE INDEX idx_summary_year_table ON summary(year, source_table, 科目名稱);
         CREATE INDEX idx_summary_page ON summary(page);
         CREATE INDEX idx_revenue_items_year_code ON revenue_items(year, code);
@@ -194,6 +221,8 @@ def _init_sqlite_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX idx_plans_page ON plans(page_start, page_end);
         CREATE INDEX idx_expenditure_items_year_plan_code ON expenditure_items(year, plan_code);
         CREATE INDEX idx_expenditure_items_page ON expenditure_items(page);
+        CREATE INDEX idx_memos_year ON memos(year);
+        CREATE INDEX idx_memos_type ON memos(type);
         """
     )
 
@@ -1291,6 +1320,189 @@ def _write_reference_files(site_path: Path, years: list[int], data_path: Path) -
     return ref_years
 
 
+_MEMO_REF_CELL_RE = re.compile(r"^r(\d+)c(\d+)$")
+
+
+def _resolve_memo_target(
+    memo: dict[str, str],
+    year_int: int,
+    page_int: int,
+    summary_rows_by_year: dict[int, list[dict[str, Any]]],
+    search_id_set: set[str],
+    ref_cells_by_year: dict[int, set[tuple[int, int, int]]],
+) -> dict[str, Any]:
+    """解析單筆備註的 scope 與 locator，並驗證對應的 search_id 或參考表儲存格存在。"""
+    memo_id = memo["memo_id"].strip()
+    scope = memo["scope"].strip()
+    locator = memo["locator"]
+    field = memo["field"].strip()
+
+    if scope == "revenue_item":
+        parts = locator.split(":")
+        if len(parts) != 2 or not parts[0] or not parts[1]:
+            raise ValueError(f"Memo {memo_id}: invalid revenue_item locator {locator!r}")
+        code, item_seq_str = parts
+        item_seq = int(item_seq_str)
+        search_id = f"{year_int}-revenue-{code}-{item_seq}"
+        if search_id not in search_id_set:
+            raise ValueError(f"Memo {memo_id}: search_id {search_id!r} not found in search.json")
+        return {
+            "kind": "revenue",
+            "search_id": search_id,
+            "code": code,
+            "item_seq": item_seq,
+            "page": page_int,
+        }
+
+    if scope == "expenditure_item":
+        parts = locator.split(":")
+        if len(parts) != 3 or not all(parts):
+            raise ValueError(f"Memo {memo_id}: invalid expenditure_item locator {locator!r}")
+        plan_code, use_code, item_seq_str = parts
+        item_seq = int(item_seq_str)
+        search_id = f"{year_int}-expenditure-{plan_code}-{use_code}-{item_seq}"
+        if search_id not in search_id_set:
+            raise ValueError(f"Memo {memo_id}: search_id {search_id!r} not found in search.json")
+        return {
+            "kind": "expenditure",
+            "search_id": search_id,
+            "plan_code": plan_code,
+            "用途別_code": use_code,
+            "item_seq": item_seq,
+            "page": page_int,
+        }
+
+    if scope == "plan":
+        if not locator:
+            raise ValueError(f"Memo {memo_id}: empty plan locator")
+        search_id = f"{year_int}-plan-{locator}"
+        if search_id not in search_id_set:
+            raise ValueError(f"Memo {memo_id}: search_id {search_id!r} not found in search.json")
+        return {
+            "kind": "plan",
+            "search_id": search_id,
+            "plan_code": locator,
+        }
+
+    if scope == "summary":
+        parts = locator.split(":", 1)
+        if len(parts) != 2 or not parts[0] or not parts[1]:
+            raise ValueError(f"Memo {memo_id}: invalid summary locator {locator!r}")
+        source_table, subject = parts
+        matches = [
+            idx
+            for idx, r in enumerate(summary_rows_by_year.get(year_int, []), start=1)
+            if r["source_table"] == source_table and r["科目名稱"] == subject
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                f"Memo {memo_id}: summary locator {locator!r} matched {len(matches)} rows (expected 1)"
+            )
+        search_id = f"{year_int}-summary-{matches[0]:04d}"
+        if search_id not in search_id_set:
+            raise ValueError(f"Memo {memo_id}: search_id {search_id!r} not found in search.json")
+        return {
+            "kind": "summary",
+            "search_id": search_id,
+            "source_table": source_table,
+            "科目名稱": subject,
+            "field": field,
+            "page": page_int,
+        }
+
+    if scope == "reference_cell":
+        m = _MEMO_REF_CELL_RE.match(locator)
+        if not m:
+            raise ValueError(f"Memo {memo_id}: invalid reference_cell locator {locator!r}")
+        row_idx, col_idx = int(m.group(1)), int(m.group(2))
+        if (page_int, row_idx, col_idx) not in ref_cells_by_year.get(year_int, set()):
+            raise ValueError(
+                f"Memo {memo_id}: reference cell (page={page_int}, r={row_idx}, c={col_idx}) not found"
+            )
+        return {
+            "kind": "reference",
+            "page": page_int,
+            "row": row_idx,
+            "col": col_idx,
+        }
+
+    if scope == "page":
+        return {
+            "kind": "page",
+            "page": page_int,
+        }
+
+    raise ValueError(f"Memo {memo_id}: unsupported scope {scope!r}")
+
+
+def _build_memos_data(
+    data_path: Path,
+    summary_rows_by_year: dict[int, list[dict[str, Any]]],
+    search_id_set: set[str],
+    ref_cells_by_year: dict[int, set[tuple[int, int, int]]],
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[int]]:
+    """讀取 `data/memos.csv`，解析 target 並回傳 `(memos_json, sqlite_rows, memo_years)`。"""
+    memos_path = data_path / "memos.csv"
+    integrity_errors = check_memos_csv_integrity(memos_path=memos_path)
+    if integrity_errors:
+        raise ValueError("; ".join(integrity_errors))
+
+    raw_memos = load_memos(memos_path=memos_path)
+    memos_by_year: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    sqlite_rows: list[dict[str, Any]] = []
+
+    for m in raw_memos:
+        memo_id = m["memo_id"].strip()
+        year_int = int(m["year"].strip())
+        page_int = int(m["page"].strip())
+        pdf_page_int = int(m["pdf_page"].strip())
+        target = _resolve_memo_target(
+            m,
+            year_int,
+            page_int,
+            summary_rows_by_year,
+            search_id_set,
+            ref_cells_by_year,
+        )
+
+        memo_obj: dict[str, Any] = {
+            "memo_id": memo_id,
+            "year": year_int,
+            "scope": m["scope"].strip(),
+            "page": page_int,
+            "locator": m["locator"],
+            "field": m["field"].strip(),
+            "type": m["type"].strip(),
+            "printed_text": m["printed_text"],
+            "data_text": m["data_text"],
+            "suggested_text": m["suggested_text"],
+            "note": m["note"],
+            "pdf_file": m["pdf_file"].strip(),
+            "pdf_page": pdf_page_int,
+            "verified_method": m["verified_method"].strip(),
+            "verified_on": m["verified_on"].strip(),
+            "evidence": m["evidence"].strip(),
+            "status": m["status"].strip(),
+            "target": target,
+        }
+        memos_by_year[year_int].append(memo_obj)
+
+        sqlite_row = {k: v for k, v in memo_obj.items() if k != "target"}
+        sqlite_row["target_kind"] = target["kind"]
+        sqlite_row["target_search_id"] = target.get("search_id")
+        sqlite_rows.append(sqlite_row)
+
+    memo_years = sorted(memos_by_year.keys())
+    memos_json = {
+        "years": {
+            str(y): sorted(memos_by_year[y], key=lambda x: x["memo_id"])
+            for y in memo_years
+        }
+    }
+    sqlite_rows.sort(key=lambda x: (x["year"], x["memo_id"]))
+    return memos_json, sqlite_rows, memo_years
+
+
 def build(
     data_dir: Path | str = ROOT_DIR / "data",
     out_dir: Path | str = ROOT_DIR / "build",
@@ -1316,6 +1528,7 @@ def build(
     all_search_docs: list[dict[str, Any]] = []
     year_summaries: list[dict[str, Any]] = []
     compare_items_by_year: dict[int, dict[str, dict[str, Any]]] = {}
+    summary_rows_by_year: dict[int, list[dict[str, Any]]] = {}
 
     conn = sqlite3.connect(str(sqlite_path))
     try:
@@ -1330,6 +1543,7 @@ def build(
                 year_json,
                 search_docs,
             ) = _build_year_data(y, data_path / str(y), known_diffs)
+            summary_rows_by_year[y] = summary_rows
             compare_items_by_year[y] = _collect_year_compare_items(
                 y, revenue_rows, year_json, known_diffs
             )
@@ -1495,6 +1709,40 @@ def build(
                 candidates_rows,
             )
 
+        ref_years = _write_reference_files(site_path, years, data_path)
+        ref_cells_by_year: dict[int, set[tuple[int, int, int]]] = {}
+        for ry in ref_years:
+            ref_rows = _read_csv(data_path / str(ry) / "reference_tables.csv")
+            ref_cells_by_year[ry] = {
+                (int(r["page"]), int(r["row_idx"]), int(r["col_idx"]))
+                for r in ref_rows
+            }
+
+        search_id_set = {doc["id"] for doc in all_search_docs}
+        memos_json, memo_sqlite_rows, memo_years = _build_memos_data(
+            data_path=data_path,
+            summary_rows_by_year=summary_rows_by_year,
+            search_id_set=search_id_set,
+            ref_cells_by_year=ref_cells_by_year,
+        )
+        if memo_sqlite_rows:
+            conn.executemany(
+                """
+                INSERT INTO memos (
+                    memo_id, year, scope, page, locator, field, type,
+                    printed_text, data_text, suggested_text, note,
+                    pdf_file, pdf_page, verified_method, verified_on, evidence, status,
+                    target_kind, target_search_id
+                ) VALUES (
+                    :memo_id, :year, :scope, :page, :locator, :field, :type,
+                    :printed_text, :data_text, :suggested_text, :note,
+                    :pdf_file, :pdf_page, :verified_method, :verified_on, :evidence, :status,
+                    :target_kind, :target_search_id
+                )
+                """,
+                memo_sqlite_rows,
+            )
+
         conn.commit()
     finally:
         conn.close()
@@ -1508,10 +1756,12 @@ def build(
             "items": items_rows,
             "items_candidates": candidates_rows,
         },
-        "reference_years": _write_reference_files(site_path, years, data_path),
+        "reference_years": ref_years,
+        "memo_years": memo_years,
     }
     _write_json_deterministic(site_path / "index.json", index_json)
     _write_json_deterministic(site_path / "search.json", all_search_docs)
+    _write_json_deterministic(site_path / "memos.json", memos_json)
 
     _write_compare_files(site_path, years, compare_items_by_year, codes_rows)
 

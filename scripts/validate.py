@@ -13,7 +13,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from scripts.memos import validate_memos
+from scripts.memos import validate_memos, validate_memos_global
 from scripts.parse_book import (
     PLAN_PREFIX_TO_FUNCTION,
     find_unapplied_corrections,
@@ -954,6 +954,7 @@ def validate_year(year: str, root_dir: Path = ROOT_DIR, partial: bool = False) -
         )
     lines.append("")
 
+    memo_global_errors = validate_memos_global(root_dir=root_dir)
     memo_validation = validate_memos(year_str, root_dir=root_dir)
     if memo_validation["results"]:
         lines.append("## 9. 備註檢查")
@@ -1009,6 +1010,7 @@ def validate_year(year: str, root_dir: Path = ROOT_DIR, partial: bool = False) -
         "expenditure_agency_checks": expenditure_agency_checks,
         "summary_conflicts": summary_conflicts,
         "memo_validation": memo_validation,
+        "memo_global_errors": memo_global_errors,
     }
 
 
@@ -1028,6 +1030,7 @@ def main(argv: list[str] | None = None) -> int:
     failed_exp_plans = [c for c in res["expenditure_plan_checks"] if c["failed"]]
     failed_agency_checks = [c for c in res["expenditure_agency_checks"] if not c["passed"]]
     memo_res = res["memo_validation"]
+    memo_global_errors = res.get("memo_global_errors", [])
     failed_memos = [m for m in memo_res["results"] if not m["passed"]]
     memo_summary = (
         f"、備註檢查通過 {memo_res['passed_count']}/{len(memo_res['results'])}"
@@ -1045,6 +1048,8 @@ def main(argv: list[str] | None = None) -> int:
         f"跨表衝突 {len(res['summary_conflicts'])} 項"
         f"{memo_summary}。"
     )
+    for g_err in memo_global_errors:
+        print(f"[備註跨年度/格式錯誤] {g_err}", file=sys.stderr)
     if (
         unreg_count > 0
         or unapplied_count > 0
@@ -1053,6 +1058,7 @@ def main(argv: list[str] | None = None) -> int:
         or failed_exp_plans
         or failed_agency_checks
         or failed_memos
+        or memo_global_errors
     ):
         return 1
     return 0

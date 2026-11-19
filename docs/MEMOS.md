@@ -54,7 +54,10 @@ UTF-8 編碼，標準 CSV 引號規則（含逗號、引號、換行者以雙引
 2. 查詢對應年度 CSV 的精確 `locator` 與 `data_text`（逐字）。
 3. 確認 `data/pdf_sources.csv` 已收錄該區段，依 `pdf_page = page + pdf_page_offset` 計算 `pdf_page`；未核對的區段不得推測。
 4. 將新列加入 `data/memos.csv`（注意含半形逗號之欄位須以雙引號包住）。
-5. 執行 `python3 scripts/validate.py <年> [--partial]` 與 `python3 -m unittest discover -s tests`，確認規則 V1–V7 全數通過且退出碼為 0。
+5. 執行 `python3 scripts/validate.py <年> [--partial]` 與 `python3 -m unittest discover -s tests`，確認規則 V1–V7 與跨年度／CSV 結構檢查全數通過且退出碼為 0：
+   - `data/memos.csv` 必須包含所有必要欄位，且每列欄位數須與表頭相符。
+   - 每筆備註的 `year` 必須對應存在的 `data/<年>/` 目錄（無資料年度的備註在任一年度執行 `validate.py` 時皆會導致退出碼 1）。
+   - `evidence` 若有值，必須為 `docs/evidence/` 開頭的相對路徑、不得含 `..`、不得為絕對路徑，且檔案必須存在。
 
 ## 5. `data/pdf_sources.csv` 說明
 
@@ -79,3 +82,27 @@ UTF-8 編碼，標準 CSV 引號規則（含逗號、引號、換行者以雙引
 | 115 | `115年度總萬巒鄉總預算案.pdf` | 第 70 頁 | 60 | +10 | 符合 |
 | 116 | `116年度總萬巒鄉總預算案(P1-10).pdf` | 第 16 頁 | 10 | +6 | 符合 |
 | 116 | `116年度總萬巒鄉總預算案(P37-175).pdf` | 第 91 頁 | 125 | -34 | 符合 |
+
+## 7. 建置輸出（`scripts/build.py`）
+
+執行 `python3 scripts/build.py` 會讀取 `data/memos.csv`，產生以下決定性輸出：
+
+### `site/data/memos.json`
+
+- 結構：`{"years": {"114": [...], "115": [...], "116": [...]}}`，年度鍵升冪排列，各年度內依 `memo_id` 升冪排列；無備註的年度不輸出。
+- 每筆包含 `data/memos.csv` 的全部 17 個欄位（其中 `year`、`page`、`pdf_page` 轉為整數，其餘維持字串）及解析後的 `target` 物件：
+  - `revenue_item`：`{"kind":"revenue","search_id":"<年>-revenue-<細目>-<item_seq>","code":"<細目>","item_seq":<int>,"page":<int>}`
+  - `expenditure_item`：`{"kind":"expenditure","search_id":"<年>-expenditure-<計畫>-<用途別>-<item_seq>","plan_code":"<計畫>","用途別_code":"<用途別>","item_seq":<int>,"page":<int>}`
+  - `plan`：`{"kind":"plan","search_id":"<年>-plan-<計畫編號>","plan_code":"<計畫編號>"}`
+  - `summary`：`{"kind":"summary","search_id":"<search.json 對應 id>","source_table":"<表名>","科目名稱":"<科目>","field":"<欄位>","page":<int>}`
+  - `reference_cell`：`{"kind":"reference","page":<int>,"row":<int>,"col":<int>}`
+  - `page`：`{"kind":"page","page":<int>}`
+- 建置時會驗證上述 `search_id` 皆存在於 `site/data/search.json`、`reference_cell` 皆存在於對應 `reference_<年>.json`，找不到即失敗。
+
+### SQLite `memos` 表（`build/budget.sqlite`）
+
+- 包含 `data/memos.csv` 全部 17 欄（`year`、`page`、`pdf_page` 為 `INTEGER`，`memo_id` 為 `PRIMARY KEY`）另加 `target_kind`（`TEXT`）與 `target_search_id`（`TEXT`，`reference_cell` 與 `page` 為 `NULL`）。
+
+### `site/data/index.json`
+
+- 新增 `memo_years` 整數陣列（遞增排序，列出有備註的年度，例如 `[114, 115, 116]`）。其餘欄位與既有建置結果完全相同。

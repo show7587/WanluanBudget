@@ -69,11 +69,13 @@ site/（純靜態）→ GitHub Pages（.github/workflows/pages.yml，push 到 ma
 | 歲入明細 | `<細目編號>:<item_seq>`（`item_seq` 是整個細目的流水序號，**不是**頁內序號；多頁細目如 `09120010102` 要用跨頁序號） | 欄位名（如 `說明`、`amount_元`…） |
 | 歲出明細 | `<計畫編號>:<序號>`（序號是 raw 展開前的列序，**不是** CSV 的 `item_seq`） | 欄位名 |
 | 總表（summary） | `<表名>:<款>-<項>-<名稱>`（用**修正前**的值） | `款`／`項`／`科目名稱` |
-| 參考表（114） | `ref:r{row}c{col}`（原始座標） | `text` |
+| 參考表（114）單格 | `ref:r{row}c{col}`（原始座標） | `text` |
+| 參考表（114）整列 | `ref:r{row}`（原始列號，沒有 `c`） | `_rows`：`old` 為原始列的 JSON `[[col,rowspan,colspan,text],...]`（須逐字相符），`new` 為替換列的 JSON 陣列（每列同樣是格子陣列；`[]` = 刪除該列） |
 | 特殊動作 | 同上 | `_row_action`，`new=DROP_SUBTOTAL_ROW`（排除被當成明細的小計列） |
 | 已知差額 | — | `_known_diff`，`new=UNRESOLVED` |
 
 - `old` 必須與 raw **逐字相同**，否則判為「已登記但未套用」，`validate.py` 退出碼 1。
+- 參考表的處理順序：(1) 單格文字修正 → (2) 整列取代／刪除 → (3) 重編 `row_idx` 為連續。**所有 locator 一律寫「原始」列號**（OCR HTML 解析後、套用任何修正之前），不是 CSV 裡看到的新列號；同一頁在整列修正之後的列若還要加單格修正，也要寫原始列號。同一原始列不可同時有單格與整列修正（會 raise）。整列修正的替換列必須明確列出該列所有未被上方 rowspan 覆蓋的欄（空格寫 `[col,1,1,""]`），因為 `site/app.js` 只把每列的格子排序後直接輸出 `<td>`、不補空洞，漏格會讓整列往左偏。
 - 欄位值可用 `||` 把一列拆成多列。
 - 修正筆數：`parse_book.py` 會印出套用／未套用／未登記異常；三者要分別是 N／0／0。
 
@@ -100,7 +102,7 @@ site/（純靜態）→ GitHub Pages（.github/workflows/pages.yml，push 到 ma
 python3 scripts/parse_book.py 114 --partial --reference-tables
 python3 scripts/validate.py 114 --partial
 python3 scripts/build.py                       # 決定性：重跑不應產生差異
-python3 -m unittest discover -s tests          # 約 60 個；tests/test_frontend.py 用 Node vm 模擬 DOM，沒有 node 會自動略過
+python3 -m unittest discover -s tests          # 約 70 個；tests/test_frontend.py 用 Node vm 模擬 DOM，沒有 node 會自動略過
 ```
 
 **重要副作用**：`unittest discover` 會對真實 repo 重跑 `parse_book.py 116` 與 `validate.py 116`，寫回 `data/116/*.csv` 與 `reports/validate_116.md`。結果必須與 `HEAD` 完全相同（冪等）；跑完請 `git status --short` 確認沒有意外變動。
@@ -113,7 +115,7 @@ python3 -m unittest discover -s tests          # 約 60 個；tests/test_fronten
 - 114 一律用 `--partial`。不帶時會在三處失敗（part1 表頭被 OCR 成「萬縊」、歲入表頭 16/24 頁、歲出表頭 82/93 頁）；修法是重新 OCR 並替換 `raw/114`，但會讓既有修正的 `old` 對不上，而且「嚴格模式」本身不增加正確性證據。`--partial` 下表數與目錄頁數的核對已通過。
 - `raw/114/part2.md`（p11–p36 的預算表）沒有任何程式讀它，不影響已發布資料；其機關別資訊已用 p10 核對。
 - 書面 PDF：`data/114/114年度萬巒鄉總預算Part1.pdf`（p1–p90 為主）與 `…Part2.pdf`（88 頁；PDF 第 n 頁約對應原書 p(88+n)，到 p153；p154 之後偏移，第 77、83 頁是只印標題的扉頁，第 88 頁空白）。PDF 為掃描影像、**無文字層**，也**不在 git 內**（`.gitignore` 的 `data/114/*.pdf`）。另有 `114年度屏東縣萬巒鄉總決算.pdf` 與 `…第一次追加(減)預算案.pdf`，**從未打開過**，內容與可用性未知。
-- 用 PDF 做獨立核對時：PDF 沒有文字層，需先 `pdftoppm`（`brew install poppler`）轉圖；做法是請另一個模型**不看現有 CSV** 獨立轉錄圖片，再用**確定性腳本**逐格 diff，只裁決不一致處。已完成的核對：歲出明細 p91–p153（63 頁、408 列）金額零差異，6 格說明文字已依原書修正；參考表 p154–p173 除 p165、p159 外與原件一致。
+- 用 PDF 做獨立核對時：PDF 沒有文字層，需先 `pdftoppm`（`brew install poppler`）轉圖；做法是請另一個模型**不看現有 CSV** 獨立轉錄圖片，再用**確定性腳本**逐格 diff，只裁決不一致處。已完成的核對：歲出明細 p91–p153（63 頁、408 列）金額零差異，6 格說明文字已依原書修正；參考表 p154–p173 除 p165（已修正）與 p159（缺「備註」欄、暫不處理）外與原件一致。
 
 ### 原書本身的印刷不一致（保留原樣，不要改）
 - 114：稅課收入前年度決算 p1 為 219,572、p6 為 219,573；其他收入 p1 為 7,322、p6 為 7,321（p6 影像已確認）。
@@ -127,7 +129,7 @@ python3 -m unittest discover -s tests          # 約 60 個；tests/test_fronten
 - 只在 CSV 與網站「參考表」頁呈現，內容為 OCR 原樣，只套用 `corrections.csv` 登記過的修正；115、116 沒有。
 - **p159 人事費彙計表的「備註」欄沒有資料，所以不列出。** 原書在「合計」右邊有一欄「備註」（表頭有字、欄內空白），OCR 只輸出 9 欄（col 0–8），漏了整欄。只影響表頭、不影響任何數字；現有 `ref:` 修正只能改既有儲存格文字、不能新增儲存格，使用者決定先記錄、不動程式與資料（`docs/TODO.md` 待辦 9）。
 - p164「一、考察鄉民代表大陸考察」是類別標題與計畫名稱兩列併成一格，內容正確。
-- **p165 公務車輛明細表有 OCR 列黏連**：原書分開的列（每組的「小計」列＋下一組的「標頭」列）被併成一列並帶錯的 `rowspan`，例如車輛數 `243` 其實是 24 與 3、`34` 是 3 與 4、`41` 是 4 與 1，環保業務的小計「1」遺失，各組金額被放到下一列。p166–p168 已對照原件，沒有黏連。網站在 p165–p168 顯示提示（`build.py` 的 `_REFERENCE_NOTES`）。修正需要「整列取代／刪除」的機制（現有機制做不到），2026-11-19 的進行中分支為 `fix/114-p165-rows`，**合併後請更新本節與 `_REFERENCE_NOTES`**。
+- **p165 公務車輛明細表的 OCR 列黏連已修正**（2026-11-19，PR #8）：原書分開的列（每組的「小計」列＋下一組的「標頭」列）被 OCR 併成一列並帶錯的 `rowspan`（車輛數 `243` 其實是 24 與 3、`34` 是 3 與 4、`41` 是 4 與 1，環保業務的小計「1」遺失）。用上面的「整列修正」機制登記 7 筆（4 取代、3 刪除），p165 還原為 24 列，並與 Part2.pdf 第 78 頁的獨立轉錄逐格相符；內部加總（24 = 3+4+1+16、各組小計與燃料使用費）有測試（`tests/test_reference_rows.py`）。p166–p168 對照原件後沒有黏連。網站在 p165–p168 顯示的提示（`build.py` 的 `_REFERENCE_NOTES`）已改為「p165 已依原書逐列修正」。
 
 ### 其他未完成
 - `raw/114/part2.md` 的 p27 歲出機關別預算表下半部遺失、p16–p17、p18–p19 兩組表格被合併，目前 parser 不解析（`docs/TODO.md` T5 待辦 3）。

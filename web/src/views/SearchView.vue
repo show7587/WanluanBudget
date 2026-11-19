@@ -92,7 +92,8 @@ function updateQueryParams(patch: { q?: string; kind?: SearchKindFilter; y?: str
 watch(
   () => firstQuery(route.query.q) ?? "",
   (next) => {
-    if (next !== queryInput.value) queryInput.value = next;
+    // 只在外部（上一頁、連結）改變 q 時才覆寫；輸入中的尾端空白不能被吃掉
+    if (next !== queryInput.value.trim()) queryInput.value = next;
   },
 );
 
@@ -436,15 +437,6 @@ function getTitleSegments(hit: SearchHit) {
               </template>
             </p>
 
-            <div v-if="getLink(hit)" class="hit-footer">
-              <router-link
-                :to="getLink(hit)!.to"
-                class="goto-link"
-                :aria-label="`${getLink(hit)!.label}查看「${hit.name}」`"
-              >
-                {{ getLink(hit)!.label }} <span aria-hidden="true">›</span>
-              </router-link>
-            </div>
           </article>
         </li>
       </ol>

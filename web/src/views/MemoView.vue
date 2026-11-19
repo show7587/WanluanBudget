@@ -50,6 +50,8 @@ async function loadData(y: number): Promise<void> {
   }
 
   // 輔助載入年度預算與 index，用於產生「前往對應頁面」連結；失敗不影響備註瀏覽
+  yearData.value = null;
+  hasReference.value = false;
   if (!y) return;
   try {
     const src = dataSource();

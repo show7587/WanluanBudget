@@ -601,6 +601,7 @@ function tableRegionLabel(tb: ReferenceTable, totalOnPage: number): string {
   font-size: var(--fs-xs);
 }
 
+.ref-table thead th { position: sticky; top: 0; z-index: 1; background: var(--surface-2); }
 .ref-table-wrap {
   overflow: auto;
   max-width: 100%;

@@ -266,7 +266,8 @@ export function resolveHitLink(hit: SearchDoc, lookup?: YearPathLookup): SearchL
   if (hit.kind === "revenue") {
     const targetId = `revenue:${hit.code}`;
     const trail = lookup?.revenue.get(targetId);
-    const enc = trail ? encodePath(trail) : hit.code ? targetId : undefined;
+    // 查不到完整路徑（lookup 尚未載入／該年度樹中沒有此項）時不帶 path，只前往頁面本身
+    const enc = trail ? encodePath(trail) : undefined;
     return {
       to: { path: `/${hit.year}/歲入`, ...(enc ? { query: { path: enc } } : {}) },
       label: "前往歲入頁",
@@ -278,7 +279,7 @@ export function resolveHitLink(hit: SearchDoc, lookup?: YearPathLookup): SearchL
         ? `object:${hit.code}|${hit.用途別_code}`
         : `plan:${hit.code}`;
     const trail = lookup?.expenditure.get(targetId) ?? lookup?.expenditure.get(`plan:${hit.code}`);
-    const enc = trail ? encodePath(trail) : hit.code ? `plan:${hit.code}` : undefined;
+    const enc = trail ? encodePath(trail) : undefined;
     return {
       to: {
         path: `/${hit.year}/歲出`,

@@ -1,0 +1,158 @@
+# CLAUDE.md — 萬巒鄉預算資料庫（給 AI 助手的操作手冊）
+
+屏東縣萬巒鄉總預算書（掃描 PDF → OCR）→ 正規化 CSV → 驗證報告 → SQLite／靜態網站。使用者介紹請看 `README.md`；已知問題與待辦看 `docs/TODO.md`；原始規格看 `docs/PLAN.md`（部分已過時，以本檔與程式為準）。
+
+## 先守住的規則
+
+- **一律用繁體中文（zh-TW）回覆**；技術名詞、程式碼、路徑、指令、錯誤訊息維持英文。
+- **`raw/**` 永遠不修改。** OCR 錯誤只能登記在 `data/corrections.csv`，且 `reason` 必須寫明依據（哪一頁原件、可由哪些欄位推導）。正確值推導不出來就列進報告交給使用者，**不要猜數字**。
+- **對不上的不自動修正。** 驗證報告要誠實列出失敗。
+- **不要自行擴大範圍。** 使用者說的範圍就是範圍；含糊的回覆不算同意，直接問。
+- **commit／push／PR 流程**：Conventional Commits、訊息用繁體中文；commit 前先列出檔案清單與完整訊息，等使用者明確確認。不直接推 `main`：新分支 → push 分支 → `gh pr create` → **由使用者自己在 GitHub 合併**（合併 `main` 會觸發部署，屬對外發佈）。使用者明說「直接 merge」才可代為合併，且只限他指定的那個 PR。
+- **不修改資料庫以外的使用者資料**；暫存檔放 session 的 scratchpad，不放 `/tmp`；不要複製 `data/114/*.pdf` 這類大檔（不在 git 內）。
+- 改動 `data/`、schema、序列化這類資料機制時：先唯讀探勘 → 寫計畫 → 獨立審查 → 使用者核准 → 實作 → 獨立驗證。
+
+## 資料流程
+
+```
+raw/<年>/part1.md,part2.md,part3.md        OCR 原文（唯讀）
+   │  scripts/parse_book.py <年> [--partial] [--reference-tables]
+   ▼
+data/<年>/summary.csv, revenue_items.csv, plans.csv, expenditure_items.csv  (+ reference_tables.csv 僅 114)
+   │  套用 data/corrections.csv；頁碼由目錄頁數與「每頁開頭的表頭」推算
+   │  scripts/validate.py <年> [--partial]  → reports/validate_<年>.md（任何失敗 → 退出碼 1）
+   ▼
+   │  scripts/build.py  → build/budget.sqlite（gitignore）+ site/data/*.json
+   ▼
+site/（純靜態）→ GitHub Pages（.github/workflows/pages.yml，push 到 main 時部署 ./site）
+```
+
+- `scripts/match_items.py <舊年> <新年>`：明細層級跨年度配對工具（產出 `data/crosswalk/items_candidates.csv`、`items.csv`），**目前沒有接進網站**，網站的比較只到款／項／細目／計畫層級。
+- `data/crosswalk/codes.csv`：跨年度代碼對照。`build.py` 的 `_remap_compare_item_codes` 在比較配對前換代碼，只套用在登記的年度對（例如 114 的項 04-03 ＝ 115 的項 04-02「廢舊物資售價」，115→116 不受影響）。
+
+### 年度與來源
+
+| 年度 | raw 來源 | 解析指令 | 備註 |
+|---|---|---|---|
+| 116 | MinerU 轉的 md（3 份） | `parse_book.py 116` | 資料核對完成 |
+| 115 | part1/part2 為 MinerU md；part3 歲入 23 頁（`ocr_rev/`）、歲出 87 頁（`ocr_exp/`）由 agy 讀 `raw/115/pages_img/` 重新 OCR；參考表沿用 MinerU md | `parse_book.py 115` | 目次用人工整理的 `raw/115/toc.md`；重做前的版本在 `raw/115/original/`；`pages_img/` 不進 git |
+| 114 | `data/114/114年度總預算.md` 切出 p1–p90，p91–p173 由使用者補的 `114年萬巒鄉總預算案Part1–3.md` 接上；備份在 `raw/114/original/` | `parse_book.py 114 --partial --reference-tables` | 見下方「114 的特殊處理」 |
+
+`--reference-tables` **只對 114 使用**（115、116 沒有對應的參考表 CSV；對 115 使用會產生不該存在的 `data/115/reference_tables.csv`）。
+
+### 金額單位
+總表在書上是**千元**，明細是**元**；CSV 一律存**元**，`build.py` 讀入時**不再 ×1000**。
+
+## 技術與慣例
+
+- **Python 3.14，只用標準函式庫**（`html.parser`、`csv`、`sqlite3`、`difflib`、`argparse`、`unittest`）。不要引入 pandas、BeautifulSoup 等套件。
+- **前端是原生 JS（ES module），沒有 build 步驟**。圖表用 ECharts 5.5.1、搜尋用 MiniSearch 7.1.0，由 CDN 載入並鎖定版本（見 `site/index.html`）。
+- 前端路由用 URL hash：`#/<年>/<總覽|歲出|歲入|比較|搜尋|參考表>?<參數>`；`參考表` 只有 114 顯示（`index.json` 的 `reference_years`）。比較頁依檢視年度挑相鄰年度對：(Y, Y+1) 存在就用，否則 (Y-1, Y)；`compare.json` 等於最新一對。
+- 檔案分工：`parse_book.py`（約 1,650 行，解析與修正套用）、`validate.py`（驗證與報告）、`build.py`（SQLite 與網站 JSON、參考表、比較）、`site/app.js`（路由與畫面）。
+- SQLite 表：`summary`、`revenue_items`、`plans`、`expenditure_items`、`crosswalk_codes`、`crosswalk_items`、`crosswalk_items_candidates`；有「未解決」旗標欄位（`unresolved*`），來源是 `corrections.csv` 中 `field=_known_diff` 且 `new=UNRESOLVED` 的列（機制存在，**目前沒有登記任何一筆**）。
+
+### CSV 欄位
+
+- `summary.csv`：`year,source_book,source_table,page,款,項,科目名稱,本年度,上年度,前年度決算`；唯一鍵 `(year, source_table, 科目)`。不同表互相矛盾時**兩筆都保留**。
+- `revenue_items.csv`：`year,page,code,name,item_seq,unit,qty,unit_price,amount_元,note,dept`；續頁的列歸給前一個細目，`page` 記實際所在頁。
+- `plans.csv`：`year,page_start,page_end,plan_code,name,dept,政事別,總額`。
+- `expenditure_items.csv`：`year,page,plan_code,用途別_code,用途別,unit,qty,unit_price,amount_元,說明,經費來源,item_seq`。
+- `reference_tables.csv`（114）：通用長格式，一格一列：`year,source_book,source_table,page,table_seq,row_idx,col_idx,rowspan,colspan,text,value_num`。
+- 編號：歲入細目 11 碼（例 `01120010201`）、歲出工作計畫 11 碼（例 `33120010101`）、用途別 4 碼（例 `2033`）。
+
+## corrections.csv（OCR 修正登記表）
+
+欄位：`year,page,locator,field,old,new,reason`。唯一鍵 `(page, locator, field)`（`year` 另外限定年度）。
+
+| 目標 | locator | field |
+|---|---|---|
+| 歲入明細 | `<細目編號>:<item_seq>`（`item_seq` 是整個細目的流水序號，**不是**頁內序號；多頁細目如 `09120010102` 要用跨頁序號） | 欄位名（如 `說明`、`amount_元`…） |
+| 歲出明細 | `<計畫編號>:<序號>`（序號是 raw 展開前的列序，**不是** CSV 的 `item_seq`） | 欄位名 |
+| 總表（summary） | `<表名>:<款>-<項>-<名稱>`（用**修正前**的值） | `款`／`項`／`科目名稱` |
+| 參考表（114） | `ref:r{row}c{col}`（原始座標） | `text` |
+| 特殊動作 | 同上 | `_row_action`，`new=DROP_SUBTOTAL_ROW`（排除被當成明細的小計列） |
+| 已知差額 | — | `_known_diff`，`new=UNRESOLVED` |
+
+- `old` 必須與 raw **逐字相同**，否則判為「已登記但未套用」，`validate.py` 退出碼 1。
+- 欄位值可用 `||` 把一列拆成多列。
+- 修正筆數：`parse_book.py` 會印出套用／未套用／未登記異常；三者要分別是 N／0／0。
+
+## 驗證（validate.py）檢查什麼
+
+歲入：細目明細加總 = 區塊表頭預算金額；細目 → 子目 → 項 → 款 → 總計與 part1 的歲入來源別總表一致。
+歲出：明細加總 = 用途別小計 = 計畫總額；用途別對照政事別；計畫對照 part1 政事別合計。
+機關別：p10「歲出機關別預算比較總表」的「代表會主管」= 鄉民代表會各計畫加總；「統籌支撥科目」= 退休撫卹支出＋補助及其他支出的計畫加總（三年皆相符）。
+其他：未登記的數字異常（千分位黏連等）、未套用的修正、`summary.csv` 跨表衝突（列出各自頁碼）。
+
+驗證輸出的基準（目前）：
+
+```
+114 --partial：歲出計畫 50/50、用途別 291/291、機關別 2/2、跨表衝突 2
+115          ：48/48、300/300、2/2、衝突 0
+116          ：49/49、296/296、2/2、衝突 2
+```
+
+報告裡「失敗 **0**」這類統計字樣本身也含「失敗」二字，判斷要看表格列，不要只 grep。
+
+## 常用指令與測試
+
+```bash
+python3 scripts/parse_book.py 114 --partial --reference-tables
+python3 scripts/validate.py 114 --partial
+python3 scripts/build.py                       # 決定性：重跑不應產生差異
+python3 -m unittest discover -s tests          # 約 60 個；tests/test_frontend.py 用 Node vm 模擬 DOM，沒有 node 會自動略過
+```
+
+**重要副作用**：`unittest discover` 會對真實 repo 重跑 `parse_book.py 116` 與 `validate.py 116`，寫回 `data/116/*.csv` 與 `reports/validate_116.md`。結果必須與 `HEAD` 完全相同（冪等）；跑完請 `git status --short` 確認沒有意外變動。
+
+本機預覽：`cd site && python3 -m http.server <埠>`。**瀏覽器會快取同一網址的舊 `app.js`／`index.html`，請換一個沒用過的埠。** 真實瀏覽器檢查可用 `mcp__browsermcp__browser`（延遲載入工具，先用 ToolSearch 載入）。
+
+## 已知限制與資料筆記
+
+### 114 的特殊處理
+- 114 一律用 `--partial`。不帶時會在三處失敗（part1 表頭被 OCR 成「萬縊」、歲入表頭 16/24 頁、歲出表頭 82/93 頁）；修法是重新 OCR 並替換 `raw/114`，但會讓既有修正的 `old` 對不上，而且「嚴格模式」本身不增加正確性證據。`--partial` 下表數與目錄頁數的核對已通過。
+- `raw/114/part2.md`（p11–p36 的預算表）沒有任何程式讀它，不影響已發布資料；其機關別資訊已用 p10 核對。
+- 書面 PDF：`data/114/114年度萬巒鄉總預算Part1.pdf`（p1–p90 為主）與 `…Part2.pdf`（88 頁；PDF 第 n 頁約對應原書 p(88+n)，到 p153；p154 之後偏移，第 77、83 頁是只印標題的扉頁，第 88 頁空白）。PDF 為掃描影像、**無文字層**，也**不在 git 內**（`.gitignore` 的 `data/114/*.pdf`）。另有 `114年度屏東縣萬巒鄉總決算.pdf` 與 `…第一次追加(減)預算案.pdf`，**從未打開過**，內容與可用性未知。
+- 用 PDF 做獨立核對時：PDF 沒有文字層，需先 `pdftoppm`（`brew install poppler`）轉圖；做法是請另一個模型**不看現有 CSV** 獨立轉錄圖片，再用**確定性腳本**逐格 diff，只裁決不一致處。已完成的核對：歲出明細 p91–p153（63 頁、408 列）金額零差異，6 格說明文字已依原書修正；參考表 p154–p173 除 p165、p159 外與原件一致。
+
+### 原書本身的印刷不一致（保留原樣，不要改）
+- 114：稅課收入前年度決算 p1 為 219,572、p6 為 219,573；其他收入 p1 為 7,322、p6 為 7,321（p6 影像已確認）。
+- 114：雜項收入 p5 印項 01、p6 印 02，`summary.csv` 照 p5 保留。
+- 116（TODO T4）：p1 上年度歲出基準不一致（267,169／267,969／271,169）；p10 前年度決算合計印 322,278，三個機關加總是 353,260。需向公所質詢，由使用者處理。
+- p160／p161 的「員」「工」分組標題；p165／p167 表頭的「燃料使用費(全年))」（真的印兩個右括號）；p97 役政說明文字、p55 第 10／17 筆說明、p44／p53 的括號（使用者已確認原件如此）。
+- 「資本移轉」被頁面切開：p170／p172 最右欄只印「資」（已依使用者指示補成「資本移轉」），p171／p173 左側印「本移轉」（保持原樣）。「商品及勞務購買支出」是依影像兩直行組合，書內沒有第二個來源。
+- 歲出明細說明裡的省略號（例如「第113....號」）點數是原書印刷，不是雜訊；比對時要看原圖數點。
+
+### 參考表（reference_tables.csv，僅 114）
+- 只在 CSV 與網站「參考表」頁呈現，內容為 OCR 原樣，只套用 `corrections.csv` 登記過的修正；115、116 沒有。
+- **p159 人事費彙計表的「備註」欄沒有資料，所以不列出。** 原書在「合計」右邊有一欄「備註」（表頭有字、欄內空白），OCR 只輸出 9 欄（col 0–8），漏了整欄。只影響表頭、不影響任何數字；現有 `ref:` 修正只能改既有儲存格文字、不能新增儲存格，使用者決定先記錄、不動程式與資料（`docs/TODO.md` 待辦 9）。
+- p164「一、考察鄉民代表大陸考察」是類別標題與計畫名稱兩列併成一格，內容正確。
+- **p165 公務車輛明細表有 OCR 列黏連**：原書分開的列（每組的「小計」列＋下一組的「標頭」列）被併成一列並帶錯的 `rowspan`，例如車輛數 `243` 其實是 24 與 3、`34` 是 3 與 4、`41` 是 4 與 1，環保業務的小計「1」遺失，各組金額被放到下一列。p166–p168 已對照原件，沒有黏連。網站在 p165–p168 顯示提示（`build.py` 的 `_REFERENCE_NOTES`）。修正需要「整列取代／刪除」的機制（現有機制做不到），2026-11-19 的進行中分支為 `fix/114-p165-rows`，**合併後請更新本節與 `_REFERENCE_NOTES`**。
+
+### 其他未完成
+- `raw/114/part2.md` 的 p27 歲出機關別預算表下半部遺失、p16–p17、p18–p19 兩組表格被合併，目前 parser 不解析（`docs/TODO.md` T5 待辦 3）。
+- p91–p173 的歲出明細以外，114 的 p1–p90 尚無「二次獨立讀取＋逐格比對」；說明文字、名稱、單位這類沒有數字約束的欄位是盲區。
+- 跨兩年以上的比較（例如 114 vs 116）與明細層級的跨年度配對（`match_items.py`）尚未接進網站。
+
+## 踩過的坑
+
+- **heredoc 一律用有引號的分隔符 `<<'EOF'`**。曾因沒加引號，文字中的反引號被當成命令執行，把使用者未 commit 的檔案收進 stash（已用 `git stash pop` 還原並以 sha256 核對）。內含反引號的文字改用 Write／Edit 寫檔。
+- zsh 不會把存在變數裡的檔案清單自動拆開（`for f in $FILES` 只得到一個字串）；同理 `python3 scripts/validate.py "114 --partial"` 會被當成單一參數而失敗。
+- 對含大 PDF 的 `data/114` 不要整個複製；要複製 repo 做實驗用 `rsync -a --exclude='.git' --exclude='*.pdf' --exclude='pages_img' --exclude='images'`。
+- 工具可能把輸出導到 `/tmp` 的暫存檔，要立刻清掉；一律用 scratchpad。
+- 在有未 commit 變更時要開另一條分支的工作，用 `git worktree add ../<目錄> -b <分支> main`，不要在同一個 checkout 切來切去；完成後記得 `git worktree remove`。
+- 用 agy（Antigravity CLI）做獨立轉錄或實作時，在 herdr 的**可見 pane** 開啟；在 `/model` 選單用方向鍵選模型前，**先讀畫面確認游標位置**（游標會停在上次的模型上）；主 session 必須**獨立重跑驗證**，不採信 agy 的自我報告（曾有報告引用錯誤數字的情況）。
+
+## 目錄速查
+
+```
+raw/<年>/                 OCR 原文（唯讀）；115 另有 ocr_exp/ ocr_rev/ toc.md original/
+data/<年>/                CSV；data/corrections.csv；data/crosswalk/codes.csv
+scripts/                  parse_book.py  validate.py  build.py  match_items.py
+reports/                  validate_<年>.md（由 validate.py 產生，會進 git）
+site/                     index.html  app.js  style.css  data/*.json（由 build.py 產生，會進 git）
+build/budget.sqlite       本機 SQLite（gitignore）
+tests/                    test_s1/s2/s3、test_build、test_compare、test_frontend、test_validate_agency；fixtures/
+docs/                     PLAN.md  TODO.md
+議事記錄_依科室分類.md    鄉民代表會議事記錄筆記，與預算資料庫無關
+```

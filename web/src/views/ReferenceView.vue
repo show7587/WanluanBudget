@@ -474,7 +474,13 @@ function tableRegionLabel(tb: ReferenceTable, totalOnPage: number): string {
 
 .toc-card {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
+}
+.toc-card > *,
+.toc-card select {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .toc-head {

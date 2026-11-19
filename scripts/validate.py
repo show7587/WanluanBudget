@@ -13,6 +13,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from scripts.memos import validate_memos
 from scripts.parse_book import (
     PLAN_PREFIX_TO_FUNCTION,
     find_unapplied_corrections,
@@ -953,6 +954,28 @@ def validate_year(year: str, root_dir: Path = ROOT_DIR, partial: bool = False) -
         )
     lines.append("")
 
+    memo_validation = validate_memos(year_str, root_dir=root_dir)
+    if memo_validation["results"]:
+        lines.append("## 9. 備註檢查")
+        lines.append("")
+        lines.append(
+            f"- 備註總數：{len(memo_validation['results'])} 筆、"
+            f"通過 **{memo_validation['passed_count']}** 筆、"
+            f"失敗 **{memo_validation['failed_count']}** 筆"
+        )
+        lines.append("")
+        lines.append("| memo_id | 頁碼 | scope | locator | 類型 | 狀態 | 結果 | 說明 |")
+        lines.append("|---|---:|---|---|---|---|---|---|")
+        for mr in memo_validation["results"]:
+            status_str = "通過" if mr["passed"] else "失敗"
+            err_str = "；".join(mr["errors"]) if mr["errors"] else "-"
+            loc_str = mr["locator"] or "-"
+            lines.append(
+                f"| {mr['memo_id']} | p{mr['page']} | {mr['scope']} | {loc_str} | "
+                f"{mr['type']} | {mr['status']} | {status_str} | {err_str} |"
+            )
+        lines.append("")
+
     report_path.write_text("\n".join(lines), encoding="utf-8")
 
     return {
@@ -985,6 +1008,7 @@ def validate_year(year: str, root_dir: Path = ROOT_DIR, partial: bool = False) -
         "total_exp_detail_yuan": total_exp_detail,
         "expenditure_agency_checks": expenditure_agency_checks,
         "summary_conflicts": summary_conflicts,
+        "memo_validation": memo_validation,
     }
 
 
@@ -1003,6 +1027,13 @@ def main(argv: list[str] | None = None) -> int:
     failed_exp_uses = [c for c in res["expenditure_use_checks"] if c["failed"]]
     failed_exp_plans = [c for c in res["expenditure_plan_checks"] if c["failed"]]
     failed_agency_checks = [c for c in res["expenditure_agency_checks"] if not c["passed"]]
+    memo_res = res["memo_validation"]
+    failed_memos = [m for m in memo_res["results"] if not m["passed"]]
+    memo_summary = (
+        f"、備註檢查通過 {memo_res['passed_count']}/{len(memo_res['results'])}"
+        if memo_res["results"]
+        else ""
+    )
     print(
         f"[{year}年度] 驗證報告已寫入 {res['report_path']}："
         f"未登記數字異常 {unreg_count} 筆、"
@@ -1011,7 +1042,8 @@ def main(argv: list[str] | None = None) -> int:
         f"歲出計畫通過 {sum(1 for p in res['expenditure_plan_checks'] if p['passed'])}/{len(res['expenditure_plan_checks'])}、"
         f"歲出用途別通過 {sum(1 for u in res['expenditure_use_checks'] if u['passed'])}/{len(res['expenditure_use_checks'])}、"
         f"機關別核對通過 {sum(1 for a in res['expenditure_agency_checks'] if a['passed'])}/{len(res['expenditure_agency_checks'])}、"
-        f"跨表衝突 {len(res['summary_conflicts'])} 項。"
+        f"跨表衝突 {len(res['summary_conflicts'])} 項"
+        f"{memo_summary}。"
     )
     if (
         unreg_count > 0
@@ -1020,6 +1052,7 @@ def main(argv: list[str] | None = None) -> int:
         or failed_exp_uses
         or failed_exp_plans
         or failed_agency_checks
+        or failed_memos
     ):
         return 1
     return 0

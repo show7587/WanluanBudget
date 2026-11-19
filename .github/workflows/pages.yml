@@ -23,10 +23,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
-      - name: 複製證據圖到網站
-        run: cp -r docs/evidence site/evidence
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: 建置新版前端（Vue 3 + Vite）
+        working-directory: web
+        run: |
+          npm ci
+          npm test
+          npm run build
+      - name: 打包舊版（搜尋／參考表／備註）與證據圖到 legacy/
+        run: |
+          mkdir -p web/dist/legacy
+          cp -r site/. web/dist/legacy/
+          cp -r docs/evidence web/dist/legacy/evidence
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: ./site
+          path: ./web/dist
       - id: deployment
         uses: actions/deploy-pages@v4

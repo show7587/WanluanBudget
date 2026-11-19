@@ -46,7 +46,7 @@ site/（純靜態）→ GitHub Pages（.github/workflows/pages.yml，push 到 ma
 ## 技術與慣例
 
 - **Python 3.14，只用標準函式庫**（`html.parser`、`csv`、`sqlite3`、`difflib`、`argparse`、`unittest`）。不要引入 pandas、BeautifulSoup 等套件。
-- **前端是原生 JS（ES module），沒有 build 步驟**。圖表用 ECharts 5.5.1、搜尋用 MiniSearch 7.1.0，由 CDN 載入並鎖定版本（見 `site/index.html`）。
+- **前端有兩套**：新版 `web/`（Vue 3 + TypeScript + Vite 6 + vue-router hash + ECharts 5.5.1 npm 版；`cd web && npm ci && npm test && npm run build`，輸出 `web/dist`，資料讀 `site/data/*.json`，頁面：總覽／歲出（政事別、機關別、用途別）／歲入／比較；資料轉換層在 `web/src/data/`）；舊版 `site/`（原生 JS、無 build，ECharts／MiniSearch 由 CDN 載入）暫時保留搜尋、參考表、備註，部署時放在 `legacy/`。
 - 前端路由用 URL hash：`#/<年>/<總覽|歲出|歲入|比較|搜尋|參考表|備註>?<參數>`；`參考表` 只有 114 顯示（`index.json` 的 `reference_years`），`備註` 只在 `index.json` 的 `memo_years` 含該年度時顯示。比較頁依檢視年度挑相鄰年度對：(Y, Y+1) 存在就用，否則 (Y-1, Y)；`compare.json` 等於最新一對。
 - 檔案分工：`parse_book.py`（約 1,650 行，解析與修正套用）、`memos.py`（備註表與 PDF 頁碼對照的載入、定位與驗證）、`validate.py`（驗證與報告）、`build.py`（SQLite 與網站 JSON、參考表、比較、備註）、`site/app.js`（路由與畫面）。
 - SQLite 表：`summary`、`revenue_items`、`plans`、`expenditure_items`、`crosswalk_codes`、`crosswalk_items`、`crosswalk_items_candidates`、`memos`；有「未解決」旗標欄位（`unresolved*`），來源是 `corrections.csv` 中 `field=_known_diff` 且 `new=UNRESOLVED` 的列（機制存在，**目前沒有登記任何一筆**）。
@@ -88,7 +88,7 @@ site/（純靜態）→ GitHub Pages（.github/workflows/pages.yml，push 到 ma
 - **驗證規則**：`scripts/memos.py` 的 `validate_memos_global` 與 `validate_memos(<年>)` 檢查 CSV 完整性、年度目錄存在與 V1–V7（唯一 ID、locator 恰好命中 1 列且頁碼相符、`data_text` 逐字 guard、`print_typo` 必填且不同的 `printed_text`/`suggested_text`、`pdf_sources.csv` 頁碼偏移、安全的 `docs/evidence/` 路徑且檔案存在、合法日期）。`validate.py` 與 `build.py` 共用同一組檢查，任一失敗皆中止且 `build.py` 不寫出 `memos.json`。
 - **建置輸出**：`site/data/memos.json`（依年度分組、帶解析後的 `target`）、SQLite `memos` 表、`site/data/index.json` 的 `memo_years`。
 - **前端行為**：依 `index.memo_years` 載入 `data/memos.json`（載入失敗快取為 `null`、優雅降級）；各畫面有備註的項目顯示 `ⓘ` 按鈕開啟共用詳情面板；備註頁 `#/<年>/備註` 支援 `type` 與 `p` 篩選與連回對應畫面；搜尋索引僅將 `print_typo` 的 `suggested_text` 併入 `alias` 欄位（避免其他類型的說明文字污染搜尋）。
-- **證據圖部署與本機預覽**：CI（`.github/workflows/pages.yml`）在打包前執行 `cp -r docs/evidence site/evidence`，不把圖片 commit 進 `site/`；`site/evidence/` 已加入 `.gitignore`。本機預覽若要看到證據圖可先執行 `mkdir -p site/evidence && cp -R docs/evidence/. site/evidence/`（可重複執行），未複製時前端自動降級只顯示路徑文字。
+- **證據圖部署與本機預覽**：CI（`.github/workflows/pages.yml`）先建置 `web/`，再把 `site/` 與 `docs/evidence` 複製到 `web/dist/legacy/`，不把圖片 commit 進 `site/`；`site/evidence/` 已加入 `.gitignore`。本機預覽若要看到證據圖可先執行 `mkdir -p site/evidence && cp -R docs/evidence/. site/evidence/`（可重複執行），未複製時前端自動降級只顯示路徑文字。
 - **新增／修改備註的標準作法**：先對照 PDF 原圖並視需要存證據圖 → 更新 `data/memos.csv`（必要時先補已核對的 `data/pdf_sources.csv`）→ 必跑 `python3 scripts/validate.py <年> [--partial]`、`python3 scripts/build.py`、`python3 -m unittest discover -s tests`。
 
 ## 驗證（validate.py）檢查什麼

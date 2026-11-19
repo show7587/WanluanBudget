@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import re
 import sys
 from html.parser import HTMLParser
@@ -1413,6 +1414,8 @@ REFERENCE_VALUE_RE = re.compile(r"^-?\d{1,3}(,\d{3})*(\.\d+)?$|^-?\d+(\.\d+)?$")
 
 
 REFERENCE_LOCATOR_PREFIX = "ref:"
+REFERENCE_ROW_LOCATOR_RE = re.compile(r"^ref:r(\d+)$")
+REFERENCE_CELL_LOCATOR_RE = re.compile(r"^ref:r(\d+)c(\d+)$")
 
 
 def reference_cell_locator(row_idx: int, col_idx: int) -> str:
@@ -1420,8 +1423,13 @@ def reference_cell_locator(row_idx: int, col_idx: int) -> str:
     return f"{REFERENCE_LOCATOR_PREFIX}r{row_idx}c{col_idx}"
 
 
+def reference_row_locator(row_idx: int) -> str:
+    """Locator used in corrections.csv for whole-row replacement/deletion (field is always '_rows')."""
+    return f"{REFERENCE_LOCATOR_PREFIX}r{row_idx}"
+
+
 def has_reference_corrections(corrections: dict[tuple[int, str, str], dict[str, str]]) -> bool:
-    """True when corrections.csv registers any correction for reference-table cells."""
+    """True when corrections.csv registers any correction for reference-table cells or rows."""
     return any(loc.startswith(REFERENCE_LOCATOR_PREFIX) for (_, loc, _) in corrections)
 
 
@@ -1487,19 +1495,65 @@ def parse_part3_reference_tables(
             table_html = next(table_iter)
             parser = HTMLTableGridParser()
             parser.feed(table_html)
+
+            row_corr_indices: set[int] = set()
+            cell_corr_indices: set[int] = set()
+            for corr_page, loc, field in corrections:
+                if corr_page != page:
+                    continue
+                if field == "_rows":
+                    m = REFERENCE_ROW_LOCATOR_RE.match(loc)
+                    if m:
+                        row_corr_indices.add(int(m.group(1)))
+                elif field == "text":
+                    m = REFERENCE_CELL_LOCATOR_RE.match(loc)
+                    if m:
+                        cell_corr_indices.add(int(m.group(1)))
+            conflict_rows = sorted(row_corr_indices & cell_corr_indices)
+            if conflict_rows:
+                raise ValueError(
+                    f"第 {page} 頁原始列 {conflict_rows} 同時登記了格內修正與整列修正"
+                )
+
             occupied: set[tuple[int, int]] = set()
+            raw_page_rows: list[list[list[Any]]] = []
             for r_idx, row_cells in enumerate(parser.raw_rows):
                 c_idx = 0
+                row_items: list[list[Any]] = []
                 for text, rowspan, colspan in row_cells:
                     while (r_idx, c_idx) in occupied:
                         c_idx += 1
                     for dr in range(rowspan):
                         for dc in range(colspan):
                             occupied.add((r_idx + dr, c_idx + dc))
+                    row_items.append([c_idx, rowspan, colspan, text])
+                    c_idx += colspan
+                row_items.sort(key=lambda item: item[0])
+                raw_page_rows.append(row_items)
+
+            final_page_rows: list[list[list[Any]]] = []
+            for r_idx, raw_row in enumerate(raw_page_rows):
+                edited_row: list[list[Any]] = []
+                for c_idx, rowspan, colspan, text in raw_row:
                     corr = corrections.get((page, reference_cell_locator(r_idx, c_idx), "text"))
                     if corr is not None and text == corr["old"]:
                         text = corr["new"]
                         applied_corrections.append(corr)
+                    edited_row.append([c_idx, rowspan, colspan, text])
+
+                row_corr = corrections.get((page, reference_row_locator(r_idx), "_rows"))
+                if row_corr is not None and json.loads(row_corr["old"]) == raw_row:
+                    replacement_rows = json.loads(row_corr["new"])
+                    for rep_row in replacement_rows:
+                        final_page_rows.append(
+                            [[int(c), int(rs), int(cs), str(t)] for c, rs, cs, t in rep_row]
+                        )
+                    applied_corrections.append(row_corr)
+                else:
+                    final_page_rows.append(edited_row)
+
+            for new_r_idx, final_row in enumerate(final_page_rows):
+                for c_idx, rowspan, colspan, text in final_row:
                     value_num = ""
                     if REFERENCE_VALUE_RE.match(text):
                         value_num = text.replace(",", "")
@@ -1510,7 +1564,7 @@ def parse_part3_reference_tables(
                             "source_table": title,
                             "page": page,
                             "table_seq": 1,
-                            "row_idx": r_idx,
+                            "row_idx": new_r_idx,
                             "col_idx": c_idx,
                             "rowspan": rowspan,
                             "colspan": colspan,
@@ -1518,7 +1572,6 @@ def parse_part3_reference_tables(
                             "value_num": value_num,
                         }
                     )
-                    c_idx += colspan
     return rows, applied_corrections
 
 

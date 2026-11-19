@@ -72,7 +72,8 @@ class TestSetNavTolerance(unittest.TestCase):
                 self.assertFalse(r["failed"], r["html"][:200])
                 self.assertIn('<p class="warn">', r["html"])
                 self.assertIn("黏連", r["html"])
-                self.assertIn("243", r["html"])
+                self.assertIn("已依原書逐列修正", r["html"])
+                self.assertNotIn("243", r["html"])
                 # 提示在單位那一行之後、表格之前
                 self.assertLess(r["html"].index("單位："), r["html"].index('<p class="warn">'))
                 self.assertLess(r["html"].index('<p class="warn">'), r["html"].index("reftable"))

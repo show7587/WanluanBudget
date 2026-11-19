@@ -387,25 +387,24 @@ class TestReferenceTables(unittest.TestCase):
         return next(t for t in self.ref["tables"] if t["page"] == page)
 
     def test_vehicle_table_pages_carry_a_data_quality_note(self) -> None:
-        """公務車輛明細表（p165–p168）帶有黏連儲存格的提示；其他表沒有。"""
+        """公務車輛明細表（p165–p168）帶有資料品質提示；其他表沒有。"""
         for t in self.ref["tables"]:
             if 165 <= t["page"] <= 168:
                 self.assertEqual(t["source_table"], "公務車輛明細表", t["page"])
-                self.assertIn("黏連", t["note"])
-                self.assertIn("243", t["note"])
-                self.assertIn("24", t["note"])
-                # p165 有問題，p166–p168 已對照原書未發現問題；不可再寫成「尚未對照」
+                self.assertIn("已依原書逐列修正", t["note"])
                 self.assertIn("p165", t["note"])
                 self.assertIn("p166–p168 已對照原書", t["note"])
                 self.assertNotIn("尚未", t["note"])
+                self.assertNotIn("243", t["note"])
             else:
                 self.assertNotIn("note", t, t["page"])
 
     def test_vehicle_note_example_is_real_data(self) -> None:
-        """提示舉的例子必須真的存在：p165 車輛數欄有儲存格 243（= 24 + 3）。
-        日後若這個黏連被修正，這個測試會失敗，提醒同時移除 build.py 的 _REFERENCE_NOTES。"""
-        glued = [c for c in self._table(165)["cells"] if c["c"] == 1 and c["t"] == "243"]
-        self.assertEqual(len(glued), 1)
+        """p165 黏連儲存格已拆開：不再出現 243/34/41，且車輛數欄有 24。"""
+        col1_texts = [c["t"] for c in self._table(165)["cells"] if c["c"] == 1]
+        self.assertIn("24", col1_texts)
+        for glued in ("243", "34", "41"):
+            self.assertNotIn(glued, col1_texts)
 
     def test_tables_and_cell_counts(self) -> None:
         self.assertEqual(self.ref["year"], 114)
@@ -415,8 +414,8 @@ class TestReferenceTables(unittest.TestCase):
             n = sum(1 for r in self.csv_rows if int(r["page"]) == t["page"])
             self.assertEqual(len(t["cells"]), n, t["page"])
             total += len(t["cells"])
-        self.assertEqual(total, 2363)
-        self.assertEqual(len(self.csv_rows), 2363)
+        self.assertEqual(total, 2389)
+        self.assertEqual(len(self.csv_rows), 2389)
 
     def test_cells_match_csv(self) -> None:
         by_key = {

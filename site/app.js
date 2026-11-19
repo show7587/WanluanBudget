@@ -437,7 +437,11 @@ function renderOverview(year, data) {
       tooltip: { formatter: (p) => `${esc(p.name)}<br>${fmt(p.value)} 元` },
       series: [{
         type: "treemap", roam: false, nodeClick: false, breadcrumb: { show: false }, width: "100%", height: "100%",
-        label: { show: true, formatter: (p) => `${p.name}\n${fmtBig(p.value)}`, overflow: "truncate" },
+        label: {
+          show: true, overflow: "truncate", color: "#fff", lineHeight: 22,
+          formatter: (p) => `{n|${p.name}}\n{v|${fmtBig(p.value)}}`,
+          rich: { n: { fontSize: 17, fontWeight: "bold", color: "#fff" }, v: { fontSize: 15, color: "#fff" } },
+        },
         itemStyle: { borderColor: "#fff", borderWidth: 1, gapWidth: 1 },
         data: nodes.filter((n) => n.amount_元 > 0).map((n) => ({ name: n.name, value: n.amount_元, key: nodeKey(n) })),
       }],

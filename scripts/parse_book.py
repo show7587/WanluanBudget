@@ -496,10 +496,16 @@ def parse_part1_summary(
                     )
 
             elif canon_table_name == "收支簡明比較分析表":
-                for r in grid[1:]:
+                for grid_row_idx, r in enumerate(grid[1:], start=1):
                     raw_subj = r[0].strip()
                     if not raw_subj:
                         continue
+                    # corrections.csv：locator `收支簡明比較分析表:r{表格列號}`（表頭為第 0 列）、field `科目名稱`，
+                    # old 須與修正前的儲存格文字逐字相同
+                    subj_corr = corrections.get((page, f"{canon_table_name}:r{grid_row_idx}", "科目名稱"))
+                    if subj_corr is not None and raw_subj == subj_corr["old"]:
+                        raw_subj = subj_corr["new"]
+                        applied_corrections.append(subj_corr)
                     subj = normalize_summary_subject(canon_table_name, raw_subj)
                     vals = {}
                     for field_name, col_idx in (("本年度", 1), ("上年度", 2), ("前年度決算", 3)):

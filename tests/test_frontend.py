@@ -136,6 +136,21 @@ class TestHarnessSanity(unittest.TestCase):
         self.assertNotIn("alias", r["searchStub"]["fields"])
         self.assertNotIn("12120010204", r["html"])
 
+    def test_harness_detects_missing_type_filter_in_merge_memo_aliases(self) -> None:
+        """測試的測試：把 mergeMemoAliases 的類型判斷拿掉後，非 print_typo 備註會誤併入 alias。"""
+        src = (ROOT_DIR / "site" / "app.js").read_text(encoding="utf-8")
+        with_type_check = 'if (!m || m.type !== "print_typo" || !m.suggested_text) continue;'
+        without_type_check = "if (!m || !m.suggested_text) continue;"
+        self.assertIn(with_type_check, src, "mergeMemoAliases 的類型判斷寫法改變了，請同步更新這個測試")
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "app_no_type_filter.js"
+            bad.write_text(src.replace(with_type_check, without_type_check, 1), encoding="utf-8")
+            results = run_harness(bad)
+        r = next(x for x in results if x.get("id") == "search_alias_type_filter")
+        non_typo_doc = r["searchStub"]["inspectedDocs"]["114-revenue-01120010201-1"]
+        self.assertTrue(non_typo_doc["hasAliasKey"])
+        self.assertIn("ZZNOALIAS", non_typo_doc["alias"] or "")
+
 
 @unittest.skipUnless(NODE, "需要 node 才能執行前端測試")
 class TestMemosFrontend(unittest.TestCase):
@@ -287,6 +302,21 @@ class TestMemosFrontend(unittest.TestCase):
         self.assertFalse(r_panel["panelHidden"])
         self.assertIn("&lt;img src=x onerror=alert(1)&gt;", r_panel["panelHtml"])
         self.assertNotIn("<img src=x", r_panel["panelHtml"])
+
+    def test_9_merge_memo_aliases_excludes_non_print_typo(self) -> None:
+        r = self._by_id("search_alias_type_filter")
+        self.assertFalse(r["failed"])
+        stub = r["searchStub"]
+        self.assertIsNotNone(stub)
+        inspected = stub["inspectedDocs"]
+        non_typo_doc = inspected["114-revenue-01120010201-1"]
+        typo_doc = inspected["114-revenue-01120010202-1"]
+        self.assertTrue(non_typo_doc["found"])
+        self.assertFalse(non_typo_doc["hasAliasKey"], "非 print_typo 備註不得新增 alias 鍵")
+        self.assertNotIn("ZZNOALIAS", non_typo_doc["alias"] or "")
+        self.assertTrue(typo_doc["found"])
+        self.assertTrue(typo_doc["hasAliasKey"])
+        self.assertIn("ZZYESALIAS", typo_doc["alias"] or "")
 
 
 if __name__ == "__main__":

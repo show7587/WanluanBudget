@@ -1447,14 +1447,13 @@ def _build_memos_data(
     if not memos_path.is_file():
         return {"years": {}}, [], []
 
-    if root_dir is not None:
-        effective_root = Path(root_dir)
-    else:
-        if data_path.name != "data":
-            raise ValueError(
-                f"偵測到 {memos_path}，但 data_dir 目錄名稱為 {data_path.name!r}（非 'data'）且未提供顯式 root_dir 參數"
-            )
-        effective_root = data_path.parent
+    effective_root = Path(root_dir) if root_dir is not None else data_path.parent
+    expected_data_path = (effective_root / "data").resolve()
+    actual_data_path = data_path.resolve()
+    if expected_data_path != actual_data_path:
+        raise ValueError(
+            f"偵測到 {memos_path}，但驗證路徑 {expected_data_path} 與 data_dir 路徑 {actual_data_path} 不一致"
+        )
 
     global_errors = validate_memos_global(root_dir=effective_root)
     if global_errors:

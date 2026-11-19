@@ -57,7 +57,9 @@ UTF-8 編碼，標準 CSV 引號規則（含逗號、引號、換行者以雙引
 5. 執行 `python3 scripts/validate.py <年> [--partial]` 與 `python3 -m unittest discover -s tests`，確認規則 V1–V7 與跨年度／CSV 結構檢查全數通過且退出碼為 0：
    - `data/memos.csv` 必須包含所有必要欄位，且每列欄位數須與表頭相符。
    - 每筆備註的 `year` 必須對應存在的 `data/<年>/` 目錄（無資料年度的備註在任一年度執行 `validate.py` 時皆會導致退出碼 1）。
+   - 每筆備註的 `year`、`page`、`pdf_page` 欄位前後不得有空白（V1 檢查失敗並回報 `memo_id` 與欄位名）。
    - `evidence` 若有值，必須為 `docs/evidence/` 開頭的相對路徑、不得含 `..`、不得為絕對路徑，且檔案必須存在。
+   - `scripts/build.py` 建置時若偵測到 `data_dir/memos.csv`，驗證所讀的檔案必須與輸出所讀的為同一份（`(effective_root / "data").resolve() == data_dir.resolve()`，否則拋出 `ValueError` 且不寫出 `memos.json`）。
 
 ## 5. `data/pdf_sources.csv` 說明
 
@@ -145,4 +147,4 @@ UTF-8 編碼，標準 CSV 引號規則（含逗號、引號、換行者以雙引
 - 證據圖版本控管於 `docs/evidence/<年>/<memo_id>.png`，不 commit 進 `site/`；`site/evidence/` 已加入 `.gitignore`。
 - GitHub Actions（`.github/workflows/pages.yml`）在 `actions/upload-pages-artifact@v3` 之前執行 `cp -r docs/evidence site/evidence`，使發佈後的網站可由相對路徑 `evidence/<年>/<memo_id>.png` 載入。
 - 前端只處理以 `docs/evidence/` 開頭的 `evidence` 路徑；圖片載入失敗時（例如本機預覽未複製圖片）會移除 `<img>` 並優雅降級為只顯示路徑文字，不呈現破圖。
-- **本機預覽顯示證據圖**：在 repo 根目錄執行 `cp -r docs/evidence site/evidence` 後，再 `cd site && python3 -m http.server <埠>` 開啟。
+- **本機預覽顯示證據圖**：在 repo 根目錄執行 `mkdir -p site/evidence && cp -R docs/evidence/. site/evidence/`（可重複執行）後，再 `cd site && python3 -m http.server <埠>` 開啟。

@@ -194,6 +194,57 @@ class TestMemosNegativeRules(unittest.TestCase):
             )
             self._run_cli_expect_fail(tmp_root, "V7:")
 
+    def _setup_temp_repo_114(self, tmp_dir: Path) -> Path:
+        """Create a minimal isolated copy of year 114 CSVs/evidence/memos (excluding PDFs)."""
+        (tmp_dir / "data" / "114").mkdir(parents=True)
+        for csv_file in (ROOT_DIR / "data" / "114").glob("*.csv"):
+            shutil.copy2(csv_file, tmp_dir / "data" / "114" / csv_file.name)
+        shutil.copy2(ROOT_DIR / "data" / "memos.csv", tmp_dir / "data" / "memos.csv")
+        shutil.copy2(ROOT_DIR / "data" / "pdf_sources.csv", tmp_dir / "data" / "pdf_sources.csv")
+        if (ROOT_DIR / "docs" / "evidence" / "114").is_dir():
+            shutil.copytree(ROOT_DIR / "docs" / "evidence" / "114", tmp_dir / "docs" / "evidence" / "114")
+        return tmp_dir
+
+    def test_v1_leading_whitespace_in_year_with_corrupted_data_text_still_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            tmp_root = self._setup_temp_repo_114(Path(td))
+            _mutate_memo_csv(
+                tmp_root / "data" / "memos.csv",
+                "M114-0001",
+                {"year": " 114", "data_text": "被改壞的測試文字"},
+            )
+            res = validate_memos("114", root_dir=tmp_root)
+            self.assertEqual(res["failed_count"], 1)
+            m1 = next(r for r in res["results"] if r["memo_id"] == "M114-0001")
+            self.assertFalse(m1["passed"])
+            joined = "\n".join(m1["errors"])
+            self.assertIn("year", joined)
+            self.assertIn("M114-0001", joined)
+            self.assertIn("V3:", joined)
+
+    def test_v1_whitespace_in_year_page_pdf_page_rejected(self) -> None:
+        cases = [
+            ("year", " 114"),
+            ("page", "59 "),
+            ("pdf_page", " 65 "),
+        ]
+        for col, bad_val in cases:
+            with self.subTest(col=col, val=bad_val), tempfile.TemporaryDirectory() as td:
+                tmp_root = self._setup_temp_repo_114(Path(td))
+                _mutate_memo_csv(
+                    tmp_root / "data" / "memos.csv",
+                    "M114-0001",
+                    {col: bad_val},
+                )
+                res = validate_memos("114", root_dir=tmp_root)
+                self.assertEqual(res["failed_count"], 1)
+                m1 = next(r for r in res["results"] if r["memo_id"] == "M114-0001")
+                self.assertFalse(m1["passed"])
+                joined = "\n".join(m1["errors"])
+                self.assertIn("V1:", joined)
+                self.assertIn("M114-0001", joined)
+                self.assertIn(col, joined)
+
 
 if __name__ == "__main__":
     unittest.main()

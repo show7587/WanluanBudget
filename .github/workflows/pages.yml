@@ -34,11 +34,6 @@ jobs:
           npm ci
           npm test
           npm run build
-      - name: 打包舊版（搜尋／參考表／備註）與證據圖到 legacy/
-        run: |
-          mkdir -p web/dist/legacy
-          cp -r site/. web/dist/legacy/
-          cp -r docs/evidence web/dist/legacy/evidence
       - uses: actions/upload-pages-artifact@v3
         with:
           path: ./web/dist

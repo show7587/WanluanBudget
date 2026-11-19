@@ -147,4 +147,4 @@ UTF-8 編碼，標準 CSV 引號規則（含逗號、引號、換行者以雙引
 - 證據圖版本控管於 `docs/evidence/<年>/<memo_id>.png`，不 commit 進 `site/`；`site/evidence/` 已加入 `.gitignore`。
 - GitHub Actions（`.github/workflows/pages.yml`）在 `actions/upload-pages-artifact@v3` 之前執行 `cp -r docs/evidence site/evidence`，使發佈後的網站可由相對路徑 `evidence/<年>/<memo_id>.png` 載入。
 - 前端只處理以 `docs/evidence/` 開頭的 `evidence` 路徑；圖片載入失敗時（例如本機預覽未複製圖片）會移除 `<img>` 並優雅降級為只顯示路徑文字，不呈現破圖。
-- **本機預覽顯示證據圖**：在 repo 根目錄執行 `mkdir -p site/evidence && cp -R docs/evidence/. site/evidence/`（可重複執行）後，再 `cd site && python3 -m http.server <埠>` 開啟。
+- **本機預覽顯示證據圖**：`cd web && npm run dev` 即可，dev server 會直接提供 `docs/evidence`（建置時複製到 `web/dist/evidence`）。

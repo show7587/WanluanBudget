@@ -37,7 +37,6 @@ function changeYear(e: Event): void {
   void router.push({ path: `/${y}/${String(route.path.split("/")[2] ?? "總覽")}`, query: { ...route.query, path: undefined, filter: undefined } });
 }
 
-const legacyHref = computed(() => `legacy/index.html#/${year.value || ""}`);
 </script>
 
 <template>
@@ -56,7 +55,6 @@ const legacyHref = computed(() => `legacy/index.html#/${year.value || ""}`);
           <option v-for="y in index?.years ?? [year]" :key="y" :value="y">{{ y }} 年度</option>
         </select>
       </label>
-      <a class="legacy" :href="legacyHref">舊版網站</a>
     </div>
   </header>
   <main id="main" tabindex="-1">
@@ -81,7 +79,6 @@ const legacyHref = computed(() => `legacy/index.html#/${year.value || ""}`);
 .nav-link.active { background: var(--accent); color: var(--accent-contrast); }
 .tools { margin-left: auto; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 select { font: inherit; padding: 6px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface); color: var(--text); min-height: 36px; }
-.legacy { font-size: var(--fs-sm); }
 .foot { max-width: 1200px; margin: 0 auto; padding: 24px 16px; font-size: var(--fs-sm); }
 @media (max-width: 640px) { .tools { margin-left: 0; width: 100%; } }
 </style>

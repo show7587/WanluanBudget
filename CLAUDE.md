@@ -46,9 +46,9 @@ site/（純靜態）→ GitHub Pages（.github/workflows/pages.yml，push 到 ma
 ## 技術與慣例
 
 - **Python 3.14，只用標準函式庫**（`html.parser`、`csv`、`sqlite3`、`difflib`、`argparse`、`unittest`）。不要引入 pandas、BeautifulSoup 等套件。
-- **前端是原生 JS（ES module），沒有 build 步驟**。圖表用 ECharts 5.5.1、搜尋用 MiniSearch 7.1.0，由 CDN 載入並鎖定版本（見 `site/index.html`）。
-- 前端路由用 URL hash：`#/<年>/<總覽|歲出|歲入|比較|搜尋|參考表|備註>?<參數>`；`參考表` 只有 114 顯示（`index.json` 的 `reference_years`），`備註` 只在 `index.json` 的 `memo_years` 含該年度時顯示。比較頁依檢視年度挑相鄰年度對：(Y, Y+1) 存在就用，否則 (Y-1, Y)；`compare.json` 等於最新一對。
-- 檔案分工：`parse_book.py`（約 1,650 行，解析與修正套用）、`memos.py`（備註表與 PDF 頁碼對照的載入、定位與驗證）、`validate.py`（驗證與報告）、`build.py`（SQLite 與網站 JSON、參考表、比較、備註）、`site/app.js`（路由與畫面）。
+- **前端是 `web/`**：Vue 3 + TypeScript + Vite 6 + vue-router（hash）+ ECharts 5.5.1 + MiniSearch 7.1.0（皆 npm 版、鎖版本）。`cd web && npm ci && npm test && npm run build`，輸出 `web/dist`；資料讀 `site/data/*.json`（`site/` 現在只放 `build.py` 產生的資料）。頁面：總覽／歲出（政事別、機關別、用途別）／歲入／比較／搜尋／參考表／備註。資料轉換層在 `web/src/data/`，各頁在 `web/src/views/`，共用元件在 `web/src/components/`。舊的原生 JS 前端（`site/app.js` 等）已於 2026-11-20 移除，需要時從 git 歷史找。
+- 前端路由用 URL hash：`#/<年>/<總覽|歲出|歲入|比較|搜尋|參考表|備註>?<參數>`（drill 路徑 `path=<節點id;節點id…>`、歲出視角 `view=`）；`參考表` 只有 114 顯示（`index.json` 的 `reference_years`），`備註` 只在 `index.json` 的 `memo_years` 含該年度時顯示。比較頁依檢視年度挑相鄰年度對：(Y, Y+1) 存在就用，否則 (Y-1, Y)；`compare.json` 等於最新一對。
+- 檔案分工：`parse_book.py`（約 1,650 行，解析與修正套用）、`memos.py`（備註表與 PDF 頁碼對照的載入、定位與驗證）、`validate.py`（驗證與報告）、`build.py`（SQLite 與網站 JSON、參考表、比較、備註）、`web/src/`（前端：路由、畫面、資料轉換）。
 - SQLite 表：`summary`、`revenue_items`、`plans`、`expenditure_items`、`crosswalk_codes`、`crosswalk_items`、`crosswalk_items_candidates`、`memos`；有「未解決」旗標欄位（`unresolved*`），來源是 `corrections.csv` 中 `field=_known_diff` 且 `new=UNRESOLVED` 的列（機制存在，**目前沒有登記任何一筆**）。
 
 ### CSV 欄位
@@ -75,7 +75,7 @@ site/（純靜態）→ GitHub Pages（.github/workflows/pages.yml，push 到 ma
 | 已知差額 | — | `_known_diff`，`new=UNRESOLVED` |
 
 - `old` 必須與 raw **逐字相同**，否則判為「已登記但未套用」，`validate.py` 退出碼 1。
-- 參考表的處理順序：(1) 單格文字修正 → (2) 整列取代／刪除 → (3) 重編 `row_idx` 為連續。**所有 locator 一律寫「原始」列號**（OCR HTML 解析後、套用任何修正之前），不是 CSV 裡看到的新列號；同一頁在整列修正之後的列若還要加單格修正，也要寫原始列號。同一原始列不可同時有單格與整列修正（會 raise）。整列修正的替換列必須明確列出該列所有未被上方 rowspan 覆蓋的欄（空格寫 `[col,1,1,""]`），因為 `site/app.js` 只把每列的格子排序後直接輸出 `<td>`、不補空洞，漏格會讓整列往左偏。
+- 參考表的處理順序：(1) 單格文字修正 → (2) 整列取代／刪除 → (3) 重編 `row_idx` 為連續。**所有 locator 一律寫「原始」列號**（OCR HTML 解析後、套用任何修正之前），不是 CSV 裡看到的新列號；同一頁在整列修正之後的列若還要加單格修正，也要寫原始列號。同一原始列不可同時有單格與整列修正（會 raise）。整列修正的替換列必須明確列出該列所有未被上方 rowspan 覆蓋的欄（空格寫 `[col,1,1,""]`），因為 `web/src/views/reference/referenceModel.ts` 只把每列的格子排序後直接輸出 `<td>`、不補空洞，漏格會讓整列往左偏。
 - 欄位值可用 `||` 把一列拆成多列。
 - 修正筆數：`parse_book.py` 會印出套用／未套用／未登記異常；三者要分別是 N／0／0。
 
@@ -88,7 +88,7 @@ site/（純靜態）→ GitHub Pages（.github/workflows/pages.yml，push 到 ma
 - **驗證規則**：`scripts/memos.py` 的 `validate_memos_global` 與 `validate_memos(<年>)` 檢查 CSV 完整性、年度目錄存在與 V1–V7（唯一 ID、locator 恰好命中 1 列且頁碼相符、`data_text` 逐字 guard、`print_typo` 必填且不同的 `printed_text`/`suggested_text`、`pdf_sources.csv` 頁碼偏移、安全的 `docs/evidence/` 路徑且檔案存在、合法日期）。`validate.py` 與 `build.py` 共用同一組檢查，任一失敗皆中止且 `build.py` 不寫出 `memos.json`。
 - **建置輸出**：`site/data/memos.json`（依年度分組、帶解析後的 `target`）、SQLite `memos` 表、`site/data/index.json` 的 `memo_years`。
 - **前端行為**：依 `index.memo_years` 載入 `data/memos.json`（載入失敗快取為 `null`、優雅降級）；各畫面有備註的項目顯示 `ⓘ` 按鈕開啟共用詳情面板；備註頁 `#/<年>/備註` 支援 `type` 與 `p` 篩選與連回對應畫面；搜尋索引僅將 `print_typo` 的 `suggested_text` 併入 `alias` 欄位（避免其他類型的說明文字污染搜尋）。
-- **證據圖部署與本機預覽**：CI（`.github/workflows/pages.yml`）在打包前執行 `cp -r docs/evidence site/evidence`，不把圖片 commit 進 `site/`；`site/evidence/` 已加入 `.gitignore`。本機預覽若要看到證據圖可先執行 `mkdir -p site/evidence && cp -R docs/evidence/. site/evidence/`（可重複執行），未複製時前端自動降級只顯示路徑文字。
+- **證據圖部署與本機預覽**：CI（`.github/workflows/pages.yml`）建置 `web/`；Vite 在 dev 時提供 `docs/evidence`、build 時複製到 `web/dist/evidence`（`web/vite.config.ts` 的 `siteData` plugin），圖片不 commit 進 `site/`。圖片載入失敗時前端降級只顯示路徑文字。
 - **新增／修改備註的標準作法**：先對照 PDF 原圖並視需要存證據圖 → 更新 `data/memos.csv`（必要時先補已核對的 `data/pdf_sources.csv`）→ 必跑 `python3 scripts/validate.py <年> [--partial]`、`python3 scripts/build.py`、`python3 -m unittest discover -s tests`。
 
 ## 驗證（validate.py）檢查什麼
@@ -114,12 +114,12 @@ site/（純靜態）→ GitHub Pages（.github/workflows/pages.yml，push 到 ma
 python3 scripts/parse_book.py 114 --partial --reference-tables
 python3 scripts/validate.py 114 --partial
 python3 scripts/build.py                       # 決定性：重跑不應產生差異
-python3 -m unittest discover -s tests          # 約 70 個；tests/test_frontend.py 用 Node vm 模擬 DOM，沒有 node 會自動略過
+python3 -m unittest discover -s tests          # 約 100 個（Python）；前端測試在 web/：cd web && npm test
 ```
 
 **重要副作用**：`unittest discover` 會對真實 repo 重跑 `parse_book.py 116` 與 `validate.py 116`，寫回 `data/116/*.csv` 與 `reports/validate_116.md`。結果必須與 `HEAD` 完全相同（冪等）；跑完請 `git status --short` 確認沒有意外變動。
 
-本機預覽：`cd site && python3 -m http.server <埠>`。**瀏覽器會快取同一網址的舊 `app.js`／`index.html`，請換一個沒用過的埠。** 真實瀏覽器檢查可用 `mcp__browsermcp__browser`（延遲載入工具，先用 ToolSearch 載入）。
+本機預覽：`cd web && npm run dev -- --port <埠>`（建議換沒用過的埠，避免瀏覽器快取舊頁面）。 真實瀏覽器檢查可用 `mcp__browsermcp__browser`（延遲載入工具，先用 ToolSearch 載入）。
 
 ## 已知限制與資料筆記
 
@@ -164,9 +164,10 @@ raw/<年>/                 OCR 原文（唯讀）；115 另有 ocr_exp/ ocr_rev/
 data/<年>/                CSV；data/corrections.csv；data/memos.csv；data/pdf_sources.csv；data/crosswalk/codes.csv
 scripts/                  parse_book.py  validate.py  build.py  memos.py  match_items.py
 reports/                  validate_<年>.md（由 validate.py 產生，會進 git）
-site/                     index.html  app.js  style.css  data/*.json（由 build.py 產生，會進 git）；site/evidence/（gitignore）
+site/                     data/*.json（由 build.py 產生，會進 git；前端 web/ 讀取）
+web/                      Vue 3 + Vite 前端（src/data 轉換層、src/views 各頁、src/components、tests）
 build/budget.sqlite       本機 SQLite（gitignore）
-tests/                    test_s1/s2/s3、test_build、test_compare、test_frontend、test_memos*、test_validate_agency；fixtures/
+tests/                    test_s1/s2/s3、test_build、test_compare、test_memos*、test_validate_agency；fixtures/
 docs/                     PLAN.md  TODO.md  MEMOS.md  evidence/<年>/*.png
 議事記錄_依科室分類.md    鄉民代表會議事記錄筆記，與預算資料庫無關
 ```

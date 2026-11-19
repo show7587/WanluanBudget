@@ -1,0 +1,86 @@
+/* 設計 tokens：色票、字級、間距、圓角；深色模式跟隨系統，也可用 data-theme 強制 */
+:root {
+  color-scheme: light dark;
+
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #f1f3f6;
+  --border: #dde1e7;
+  --text: #1a2030;
+  --text-muted: #5b6577;
+  --accent: #1f6feb;
+  --accent-contrast: #ffffff;
+  --focus: #1f6feb;
+  --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 4px 16px rgb(16 24 40 / 6%);
+
+  /* 增減 % 發散色階（顏色之外一律另附符號與文字） */
+  --diff-new: #2b6cb0;
+  --diff-up-0: #d4ecd5;
+  --diff-up-1: #aedcb2;
+  --diff-up-2: #82c58a;
+  --diff-up-3: #55a964;
+  --diff-up-4: #2f8a46;
+  --diff-up-5: #176a34;
+  --diff-flat: #e1e4ea;
+  --diff-down-0: #f9d9d4;
+  --diff-down-1: #f3b6ad;
+  --diff-down-2: #e98f84;
+  --diff-down-3: #d86558;
+  --diff-down-4: #bc3f33;
+  --diff-down-5: #962a22;
+  --diff-unknown: #cbd5e1;
+  --diff-removed: #9ca3af;
+
+  /* 類別色（歲入／歲出主圖） */
+  --cat-1: #3b82c4;
+  --cat-2: #e0903a;
+  --cat-3: #4fa37a;
+  --cat-4: #a867b8;
+  --cat-5: #d0605e;
+  --cat-6: #3ea7b5;
+  --cat-7: #b59a2e;
+  --cat-8: #7a8696;
+
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.875rem;
+  --fs-md: 1rem;
+  --fs-lg: 1.25rem;
+  --fs-xl: 1.75rem;
+  --fs-2xl: 2.25rem;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --gap: 16px;
+  --font: system-ui, -apple-system, "Segoe UI", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f131a;
+    --surface: #171c26;
+    --surface-2: #1e2531;
+    --border: #2c3544;
+    --text: #e8ecf3;
+    --text-muted: #a2adc0;
+    --accent: #5aa2ff;
+    --accent-contrast: #0b1220;
+    --focus: #8bbcff;
+    --shadow: 0 1px 2px rgb(0 0 0 / 40%);
+    --diff-flat: #3a4252;
+    --diff-unknown: #475166;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #0f131a;
+  --surface: #171c26;
+  --surface-2: #1e2531;
+  --border: #2c3544;
+  --text: #e8ecf3;
+  --text-muted: #a2adc0;
+  --accent: #5aa2ff;
+  --accent-contrast: #0b1220;
+  --focus: #8bbcff;
+  --shadow: 0 1px 2px rgb(0 0 0 / 40%);
+  --diff-flat: #3a4252;
+  --diff-unknown: #475166;
+}

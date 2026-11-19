@@ -69,18 +69,15 @@
 
 ## 在自己的電腦上開啟網站
 
-不需要安裝任何套件，只要有 Python 3：
+需要 Node.js 20 以上：
 
 ```bash
-cd site
-python3 -m http.server 8000
+cd web
+npm ci
+npm run dev
 ```
 
-然後用瀏覽器開啟 <http://127.0.0.1:8000>。想連原書截圖一起看，先在專案根目錄執行一次：
-
-```bash
-mkdir -p site/evidence && cp -R docs/evidence/. site/evidence/
-```
+然後用瀏覽器開啟終端機顯示的網址（預設 <http://localhost:5173>）。網站讀取 `site/data/*.json`，原書截圖（`docs/evidence`）也會一併提供，不需另外複製。正式版建置用 `npm run build`，輸出在 `web/dist`。
 
 ## 其他
 

@@ -122,7 +122,7 @@
 Step 0  契約 S0（Claude）→ 使用者核准
    ├── Lane A 後端：series.json + 測試          [agy #1]  ┐
    ├── Lane B 前端：資料層 → 頁面 → 入口         [agy #2]  ├ 平行，只透過 S0 契約與 fixture 溝通
-   └── Lane C 獨立檢核：check_series.py          [Claude]  ┘
+   └── Lane C 獨立檢核：check_series.py          [agy #3]  ┘
 Step 1  整合到 feat/series → Gate：Claude 跑 D1–D9 + code review → 退回修正 → 再驗
 Step 2  端到端驗收（瀏覽器）→ 使用者確認 → commit／PR（使用者自行合併）
 ```
@@ -134,9 +134,10 @@ v1 的 5 條線（A1/A2/B1/B2/B3）縮成 2 條 agy 線：整個功能只有 3 �
 | S0 | 見下方「S0 契約」 | Claude | 使用者核准本計畫 | 契約檔（commit 在 `feat/series`） |
 | A | `build.py`：`_build_series_json`、`_write_series_file`、`index.json.series_years`；`tests/test_series.py`：schema、缺年為 null、改碼與擠掉案例、同年撞 key 報錯、plan 代碼列報錯、非相鄰年度列報錯、鏈式改碼、決定性（跑兩次相同）、體積 < 350KB | agy #1 | S0 | 後端改動＋測試 |
 | B | ① `types.ts`（`SeriesData`、`index.series_years`）、`source.ts` 的 `series()`（失敗回 `null`）、`web/src/views/trend/trendModel.ts`＋`web/tests/trendModel.test.ts`（用 S0 fixture 與期望值）；② `TrendView.vue`、`ItemPicker.vue`、`TrendChart.vue`、趨勢表、匯出、路由與導覽；③ 各頁「看趨勢」入口（§3.3 表格） | agy #2 | S0 | 前端改動＋測試 |
-| C | `scripts/check_series.py`（見 §5），**不 import `build.py` 的 series 邏輯**；輸出 `reports/check_series.md` | Claude | S0 | 檢核腳本＋報告 |
+| C | `scripts/check_series.py`（見 §5），**不 import `build.py` 的 series 邏輯**；輸出 `reports/check_series.md`；**不得讀 Lane A 的 worktree（`../wb-series-a`）或 `feat/series-a` 分支** | agy #3（Claude Sonnet） | S0 | 檢核腳本＋報告 |
 | R1 | Code review：Lane A | Claude | A | 審查意見 |
 | R2 | Code review：Lane B | Claude | B | 審查意見 |
+| R3 | Code review：Lane C（含確認沒有 import `build.py` 的 series 邏輯） | Claude | C | 審查意見 |
 | V1 | 整合驗證與端到端檢查 | Claude | 全部 | 驗證報告 |
 
 ### S0 契約
@@ -159,9 +160,9 @@ v1 的 5 條線（A1/A2/B1/B2/B3）縮成 2 條 agy 線：整個功能只有 3 �
 
 1. 使用者核准後：`git switch -c feat/series docs/plan-series`（基底含本計畫）。
 2. Claude 在 `feat/series` 完成 S0 → 經使用者同意後 commit（記為 `S0_COMMIT`）。驗證：`git ls-tree -r --name-only S0_COMMIT tests/fixtures/` 要列出兩個 fixture 檔。
-3. 從 `S0_COMMIT` 開 agy 的 worktree：`git worktree add ../wb-series-a -b feat/series-a feat/series`、`git worktree add ../wb-series-b -b feat/series-b feat/series`。
-4. Lane C 由 Claude 直接在主 checkout 的 `feat/series` 上做（檔案與 A／B 不重疊），完成後 commit 到 `feat/series`。
-5. A、B 完成並通過 R1／R2 後，`git merge --no-ff feat/series-a`、`feat/series-b` 進 `feat/series`，再跑 Gate。
+3. 從 `S0_COMMIT` 開 agy 的 worktree：`git worktree add ../wb-series-a -b feat/series-a feat/series`、`git worktree add ../wb-series-b -b feat/series-b feat/series`、`git worktree add ../wb-series-c -b feat/series-c feat/series`。
+4. Lane C 由 agy #3（模型 Claude Sonnet，2026-11-21 使用者指定）在 `../wb-series-c` 做；為了保持檢核獨立，agy #3 不得讀 Lane A 的 worktree 或分支，只能依契約、CSV 與既有 `site/data` 寫腳本。Claude 審查後 commit 到 `feat/series-c`，與 A、B 一起合併進 `feat/series`。
+5. A、B、C 完成並通過 R1／R2／R3 後，`git merge --no-ff feat/series-a`、`feat/series-b`、`feat/series-c` 進 `feat/series`，再跑 Gate。
 6. 最後的 PR 是 `feat/series` → `main`，內含本計畫、契約、A、B、C 的全部 commit。
 7. **commit 權限**：CLAUDE.md 規定 commit 前要列檔案清單與訊息並等使用者確認。核准本計畫時，使用者可以另外授權「`feat/series*` 本機分支的 commit 不必逐次確認（不含 push／PR）」；沒有授權就每次都問。agy 在自己的 worktree **不 commit**，由 Claude 審查 diff 後依上述規則 commit。
 
@@ -172,7 +173,7 @@ v1 的 5 條線（A1/A2/B1/B2/B3）縮成 2 條 agy 線：整個功能只有 3 �
 | S0（Claude） | `docs/series-contract.md`、`tests/fixtures/series_sample.json`、`tests/fixtures/series_expected.json`、`tests/test_series_fixture.py`、本計畫 |
 | A（agy #1） | `scripts/build.py`、`tests/test_series.py`、`site/data/series.json`、`site/data/index.json`（由 build 產生） |
 | B（agy #2） | `web/**`（含 `router.ts`、導覽、各 view 的入口連結） |
-| C（Claude） | `scripts/check_series.py`、`reports/check_series.md` |
+| C（agy #3） | `scripts/check_series.py`、`reports/check_series.md` |
 
 平行規則：
 
@@ -244,13 +245,12 @@ v1 的 5 條線（A1/A2/B1/B2/B3）縮成 2 條 agy 線：整個功能只有 3 �
 **回復**（全部在本機分支，尚未 push 前都可完全撤回）：
 
 - S0：見「S0 契約」。
-- Lane A／B：`git worktree remove ../wb-series-<a|b>`，不合併該分支（刪除分支需使用者同意）。
-- Lane C：`git revert` 該 commit 或不合併。
+- Lane A／B／C：`git worktree remove ../wb-series-<a|b|c>`，不合併該分支（刪除分支需使用者同意）。
 - 整個功能：不開 PR 或關閉 PR；`main` 不受影響。若已合併到 `main`，由使用者在 GitHub revert 該 PR（會觸發重新部署）。
 
 **預算**：
 
-- agy：2 個 lane，每個最多 1 次初次派工＋§6 的 2 輪修正（另受 X5 限制）。
+- agy：3 個 lane，每個最多 1 次初次派工＋§6 的 2 輪修正（另受 X5 限制）。
 - 獨立審查：計畫結案審查 1 次；Gate 後全新 `verifier` 1 次（驗證後有必要修改時最多再 1 次）。
 - 不新增 npm／Python 相依；不使用雲端付費服務。
 

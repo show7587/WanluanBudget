@@ -297,6 +297,28 @@ export function resolveHitLink(hit: SearchDoc, lookup?: YearPathLookup): SearchL
   return null;
 }
 
+/**
+ * 解析搜尋結果對應的趨勢頁項目參數（<年>:<原始key>），由趨勢頁經 aliases 解析：
+ * - revenue 明細 → <年>:revenue:<code>（細目）
+ * - expenditure 明細 / plan → <年>:plan:<code>（工作計畫）
+ * - summary 只限 text.split(' ')[0] === '歲入來源別預算總表' 且 code 非空 → <年>:revenue:<code>
+ * - 其他 summary 表不顯示入口（回傳 null）
+ */
+export function resolveHitTrendKey(hit: SearchDoc): string | null {
+  const code = String(hit.code ?? "").trim();
+  if (!code || !hit.year) return null;
+  if (hit.kind === "revenue") {
+    return `${hit.year}:revenue:${code}`;
+  }
+  if (hit.kind === "expenditure" || hit.kind === "plan") {
+    return `${hit.year}:plan:${code}`;
+  }
+  if (hit.kind === "summary" && String(hit.text ?? "").split(" ")[0] === "歲入來源別預算總表") {
+    return `${hit.year}:revenue:${code}`;
+  }
+  return null;
+}
+
 export interface SearchEngine {
   search: (query: string) => SearchHit[];
   years: number[];

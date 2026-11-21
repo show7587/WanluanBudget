@@ -23,8 +23,10 @@ const nav = computed(() => {
     { to: "歲出", label: "歲出" },
     { to: "歲入", label: "歲入" },
     { to: "比較", label: "比較" },
-    { to: "搜尋", label: "搜尋" },
   ];
+  // 趨勢頁在 series_years 至少 2 個年度時顯示
+  if ((index.value?.series_years?.length ?? 0) >= 2) items.push({ to: "趨勢", label: "趨勢" });
+  items.push({ to: "搜尋", label: "搜尋" });
   // 參考表只有部分年度有；備註只在 index.memo_years 含該年度時顯示
   if (index.value?.reference_years.includes(year.value)) items.push({ to: "參考表", label: "參考表" });
   if (index.value?.memo_years.includes(year.value)) items.push({ to: "備註", label: "資料備註" });

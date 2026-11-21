@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import type { RouteLocationRaw } from "vue-router";
 import type { TreeNode } from "@/data/types";
 import { findByPath, flatten } from "@/data/normalize";
 import { fmtCompact, fmtInt } from "@/data/format";
@@ -21,6 +22,8 @@ const props = withDefaults(
     exportName?: string;
     /** 比較年度說明，例如「較 115 年度」 */
     compareNote?: string;
+    /** 若提供，於支援趨勢的節點顯示「看趨勢」入口 */
+    trendLinkFor?: (node: TreeNode) => RouteLocationRaw | null;
   }>(),
   { colorBy: "size", showDiff: true },
 );
@@ -32,6 +35,9 @@ const resolved = computed(() => {
   return props.path.length && !node ? { node: null, trail: [] as TreeNode[] } : { node, trail };
 });
 const current = computed<TreeNode | null>(() => resolved.value.node);
+const currentTrendLink = computed(() =>
+  current.value && props.trendLinkFor ? props.trendLinkFor(current.value) : null,
+);
 const level = computed<TreeNode[]>(() => (current.value ? current.value.children : props.roots));
 const levelTotal = computed(() => level.value.reduce((s, n) => s + n.amount, 0));
 const parentTotal = computed(() => (current.value ? current.value.amount : levelTotal.value));
@@ -64,7 +70,12 @@ function up(): void {
 <template>
   <ChartPanel :title="heading" :subtitle="compareNote" :export-rows="rows" :export-name="exportName">
     <template #toolbar>
-      <Breadcrumb :items="crumbs" />
+      <div class="toolbar-row">
+        <Breadcrumb :items="crumbs" />
+        <router-link v-if="current && currentTrendLink" class="btn trend-btn" :to="currentTrendLink">
+          看「{{ current.name }}」趨勢
+        </router-link>
+      </div>
       <p v-if="resolved.trail.length" class="hint muted">提示：點圖表空白處或麵包屑可回上一層。</p>
     </template>
     <template #chart>
@@ -79,12 +90,21 @@ function up(): void {
       <DiffLegend v-if="colorBy === 'diff'" class="legend" />
     </template>
     <template #table>
-      <DataTable :nodes="level" :caption="heading" :parent-total="parentTotal" :show-diff="showDiff" @drill="drill" />
+      <DataTable
+        :nodes="level"
+        :caption="heading"
+        :parent-total="parentTotal"
+        :show-diff="showDiff"
+        :trend-link-for="trendLinkFor"
+        @drill="drill"
+      />
     </template>
   </ChartPanel>
 </template>
 
 <style scoped>
+.toolbar-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 12px; }
+.trend-btn { text-decoration: none; display: inline-flex; align-items: center; font-size: var(--fs-xs); padding: 4px 12px; min-height: 32px; }
 .hint { margin: 0; font-size: var(--fs-sm); }
 .legend { margin-top: 12px; }
 </style>

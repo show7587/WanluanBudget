@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { useRoute } from "vue-router";
-import type { ExpenditureView } from "@/data/types";
+import { useRoute, type RouteLocationRaw } from "vue-router";
+import type { ExpenditureView, TreeNode } from "@/data/types";
 import { normalizeExpenditure } from "@/data/normalize";
 import { fmtCompact, fmtYuan } from "@/data/format";
 import { useBudget } from "@/composables/useBudget";
 import { useQueryPath, useQueryString } from "@/composables/useRouteState";
 import DrillExplorer from "@/components/DrillExplorer.vue";
+import { buildTrendRoute } from "./trend/trendModel";
 
 const VIEWS: readonly ExpenditureView[] = ["政事別", "機關別", "用途別"];
 
@@ -18,7 +19,7 @@ const VIEW_META: Record<ExpenditureView, { hierarchy: string; slug: string }> = 
 
 const route = useRoute();
 const year = computed(() => Number(route.params.year) || 0);
-const { loading, error, data, compare } = useBudget(year);
+const { loading, error, index, data, compare } = useBudget(year);
 
 const view = useQueryString<ExpenditureView>("view", "政事別", VIEWS, ["path"]);
 const path = useQueryPath();
@@ -28,6 +29,20 @@ const tabRefs = ref<(HTMLButtonElement | null)[]>([]);
 const roots = computed(() =>
   data.value ? normalizeExpenditure(data.value, compare.value, view.value) : [],
 );
+const hasSeries = computed(() => (index.value?.series_years?.length ?? 0) >= 2);
+
+/**
+ * 歲出 drill：只限政事別／機關別視角下的工作計畫（plan:）與計畫下用途別（object:）；
+ * 政事別、機關與用途別視角的跨計畫彙總節點一律不顯示入口。
+ */
+function trendLinkFor(node: TreeNode): RouteLocationRaw | null {
+  if (!hasSeries.value || !year.value) return null;
+  if (view.value !== "政事別" && view.value !== "機關別") return null;
+  if (node.id.startsWith("plan:") || node.id.startsWith("object:")) {
+    return buildTrendRoute(year.value, `${year.value}:${node.id}`);
+  }
+  return null;
+}
 
 const totalAmount = computed(() => data.value?.overview.expenditure_total_元 ?? 0);
 
@@ -151,6 +166,7 @@ function onTabKeydown(e: KeyboardEvent, idx: number): void {
         :show-diff="hasDiff"
         :export-name="exportName"
         :compare-note="compareNote"
+        :trend-link-for="trendLinkFor"
       />
 
       <div v-else class="card muted" role="status">

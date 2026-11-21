@@ -74,6 +74,52 @@ export interface IndexData {
   year_summaries: Array<{ year: number; revenue_total_元: number; expenditure_total_元: number }>;
   reference_years: number[];
   memo_years: number[];
+  series_years?: number[];
 }
 
 export type ExpenditureView = "政事別" | "機關別" | "用途別";
+
+export type SeriesKind = "revenue" | "plan" | "object";
+export type SeriesLevel = "款" | "項" | "子目" | "細目" | "工作計畫" | "用途別";
+
+/** 以年度字串為 key；只含該年有此項目的年度 */
+export type ByYear<T> = Record<string, T>;
+
+export interface SeriesPage {
+  page: number;
+  page_start: number;
+  page_end: number;
+}
+
+export interface SeriesItem {
+  kind: SeriesKind;
+  level: SeriesLevel;
+  code: string;
+  display_name: string;
+  name: ByYear<string>;
+  /** years 每一年都有鍵；沒有資料為 null（不是 0） */
+  amount_元: Record<string, number | null>;
+  page: ByYear<SeriesPage>;
+  parent_key: ByYear<string | null>;
+  children: ByYear<string[]>;
+  dept: ByYear<string>;
+  /** 只有 plan / object 有 */
+  政事別?: ByYear<string>;
+  unresolved: ByYear<boolean>;
+  name_changed: boolean;
+}
+
+export interface SeriesData {
+  years: number[];
+  items: Record<string, SeriesItem>;
+  /** "<年>:<原始key>" → canonical key */
+  aliases: Record<string, string>;
+}
+
+/** 前端計算結果（trendModel.ts），不在 JSON 裡 */
+export interface SeriesDerived {
+  diff_元: Record<string, number | null>;
+  pct: Record<string, number | null>;
+  index_base_year: number | null;
+  index: Record<string, number | null>;
+}

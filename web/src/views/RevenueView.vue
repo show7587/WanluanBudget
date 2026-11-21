@@ -1,22 +1,31 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, type RouteLocationRaw } from "vue-router";
 import DrillExplorer from "@/components/DrillExplorer.vue";
 import { useBudget } from "@/composables/useBudget";
 import { useQueryPath, useQueryString } from "@/composables/useRouteState";
 import { normalizeRevenue } from "@/data/normalize";
 import type { TreeNode } from "@/data/types";
+import { buildTrendRoute } from "./trend/trendModel";
 
 type ColorMode = "size" | "diff";
 
 const route = useRoute();
 const year = computed(() => Number(route.params.year) || 0);
-const { loading, error, data, compare } = useBudget(year);
+const { loading, error, index, data, compare } = useBudget(year);
 
 const path = useQueryPath();
 const colorBy = useQueryString<ColorMode>("color", "size", ["size", "diff"]);
 
 const roots = computed<TreeNode[]>(() => (data.value ? normalizeRevenue(data.value, compare.value) : []));
+const hasSeries = computed(() => (index.value?.series_years?.length ?? 0) >= 2);
+
+/** 歲入 drill：款、項、子目、細目皆產生 <年>:revenue:<code> 入口（由趨勢頁經 aliases 解析） */
+function trendLinkFor(node: TreeNode): RouteLocationRaw | null {
+  if (!hasSeries.value || !year.value) return null;
+  if (!node.id.startsWith("revenue:") || !node.code) return null;
+  return buildTrendRoute(year.value, `${year.value}:${node.id}`);
+}
 
 const compareNote = computed(() =>
   compare.value ? `較 ${compare.value.from_year} 年度` : "無跨年度比較資料，上年度數字取自預算書",
@@ -81,6 +90,7 @@ const exportName = computed(() => `${year.value}-revenue`);
         :show-diff="true"
         :export-name="exportName"
         :compare-note="compareNote"
+        :trend-link-for="trendLinkFor"
       />
     </template>
   </div>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import type { RouteLocationRaw } from "vue-router";
 import type { TreeNode } from "@/data/types";
 import { diffBand } from "@/data/diffScale";
 import { fmtInt, fmtPct, fmtSignedPct, fmtSignedYuan } from "@/data/format";
@@ -10,11 +11,14 @@ const props = defineProps<{
   /** 上一層總額；缺省用 nodes 加總 */
   parentTotal?: number;
   showDiff?: boolean;
+  /** 若提供且節點有對應趨勢頁連結，於表格顯示「看趨勢」入口 */
+  trendLinkFor?: (node: TreeNode) => RouteLocationRaw | null;
 }>();
 const emit = defineEmits<{ (e: "drill", node: TreeNode): void }>();
 
 const total = computed(() => props.parentTotal ?? props.nodes.reduce((s, n) => s + n.amount, 0));
 const share = (n: TreeNode): string => fmtPct(total.value ? (n.amount / total.value) * 100 : 0);
+const hasTrendCol = computed(() => Boolean(props.trendLinkFor && props.nodes.some((n) => props.trendLinkFor!(n) != null)));
 </script>
 
 <template>
@@ -32,6 +36,7 @@ const share = (n: TreeNode): string => fmtPct(total.value ? (n.amount / total.va
             <th scope="col" class="num">增減 %</th>
             <th scope="col">狀態</th>
           </template>
+          <th v-if="hasTrendCol" scope="col">趨勢</th>
         </tr>
       </thead>
       <tbody>
@@ -55,6 +60,12 @@ const share = (n: TreeNode): string => fmtPct(total.value ? (n.amount / total.va
               </span>
             </td>
           </template>
+          <td v-if="hasTrendCol">
+            <router-link v-if="trendLinkFor && trendLinkFor(n)" class="trend-link" :to="trendLinkFor(n)!">
+              看趨勢
+            </router-link>
+            <span v-else class="muted">—</span>
+          </td>
         </tr>
       </tbody>
     </table>
@@ -70,5 +81,8 @@ const share = (n: TreeNode): string => fmtPct(total.value ? (n.amount / total.va
   display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px;
   border-radius: 999px; border: 1px solid var(--border); font-size: var(--fs-xs);
   border-left: 10px solid var(--c); white-space: nowrap;
+}
+.trend-link {
+  white-space: nowrap; font-size: var(--fs-xs); text-decoration: underline;
 }
 </style>

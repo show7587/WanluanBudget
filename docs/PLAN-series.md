@@ -1,6 +1,6 @@
 # 計畫：逐年趨勢與自選科目獨立比較
 
-狀態：草案 v2（2026-11-21 併入審查意見），待使用者核准後才實作。
+狀態：草案 v3（2026-11-21 併入第二輪審查意見：分支基底、S0 完成判定、停止條件／回復／預算、修正迴圈上限），待使用者核准後才實作。
 分工：**程式實作 → agy**；**契約、資料檢核與 code review → Claude**。主 session 不採信 agy 自我報告，一律獨立重跑驗證。
 執行環境：**使用者本機**（agy、herdr、browsermcp、114 PDF 都只在本機；雲端 session 無法執行本計畫的 agy 分工）。
 
@@ -104,13 +104,13 @@
 | 歲出 drill（政事別／機關別視角） | 工作計畫、計畫下的用途別 | `<年>:plan:<code>`、`<年>:object:<計畫>\|<用途別>` |
 | 歲出 drill | 政事別、機關、用途別視角的跨計畫彙總節點 | **不顯示**（series 裡沒有這些項目） |
 | 比較頁 | 每一列 | 比較頁的 key 是年度對**舊年度**的代碼：`<a>:<key>` |
-| 搜尋 | `revenue` 明細 → 細目；`expenditure` 明細與 `plan` → 工作計畫；`summary` 只限 `source_table=歲入來源別預算總表` 的款／項 | 同上 |
+| 搜尋 | `revenue` 明細 → 細目；`expenditure` 明細與 `plan` → 工作計畫；`summary` 只限款／項：`search.json` 的 summary 沒有 `source_table` 欄位，判斷方式為 `text.split(' ')[0] == '歲入來源別預算總表'`（注意不是「歲入來源別預算**比較**總表」）且 `code` 非空 | 同上 |
 | 搜尋 | 其他 `summary` 表 | 不顯示 |
 
 ### 3.4 層級範圍
 
 首版包含：歲入款／項／子目／細目、歲出工作計畫、計畫下用途別。
-**首版不含（待使用者確認，見 §8）**：政事別合計、機關合計、跨計畫用途別合計（例如全鄉「人事費」）、歲入／歲出總計。
+**首版不含（使用者 2026-11-21 確認，見 §8）**：政事別合計、機關合計、跨計畫用途別合計（例如全鄉「人事費」）、歲入／歲出總計。
 
 ### 3.5 不改的東西
 
@@ -122,7 +122,7 @@
 Step 0  契約 S0（Claude）→ 使用者核准
    ├── Lane A 後端：series.json + 測試          [agy #1]  ┐
    ├── Lane B 前端：資料層 → 頁面 → 入口         [agy #2]  ├ 平行，只透過 S0 契約與 fixture 溝通
-   └── Lane C 獨立檢核：check_series.py          [Claude]  ┘
+   └── Lane C 獨立檢核：check_series.py          [agy #3]  ┘
 Step 1  整合到 feat/series → Gate：Claude 跑 D1–D9 + code review → 退回修正 → 再驗
 Step 2  端到端驗收（瀏覽器）→ 使用者確認 → commit／PR（使用者自行合併）
 ```
@@ -131,26 +131,53 @@ v1 的 5 條線（A1/A2/B1/B2/B3）縮成 2 條 agy 線：整個功能只有 3 �
 
 | ID | 工作 | 執行者 | 依賴 | 產出 |
 |---|---|---|---|---|
-| S0 | 定稿 §3.1 schema 與 canonical 演算法；`tests/fixtures/series_sample.json`（3 年），必須包含：114 `04-03`→`04-02` 改碼＋被擠掉的 `04-02@114`、中間年缺值（`09120010101`）、只出現一年、改名、0 值、鏈式改碼（合成案例）；前端 `SeriesData` 型別草稿；fixture 對應的期望計算結果（差額／增減率／指數） | Claude | 使用者核准本計畫 | 契約檔 |
+| S0 | 見下方「S0 契約」 | Claude | 使用者核准本計畫 | 契約檔（commit 在 `feat/series`） |
 | A | `build.py`：`_build_series_json`、`_write_series_file`、`index.json.series_years`；`tests/test_series.py`：schema、缺年為 null、改碼與擠掉案例、同年撞 key 報錯、plan 代碼列報錯、非相鄰年度列報錯、鏈式改碼、決定性（跑兩次相同）、體積 < 350KB | agy #1 | S0 | 後端改動＋測試 |
 | B | ① `types.ts`（`SeriesData`、`index.series_years`）、`source.ts` 的 `series()`（失敗回 `null`）、`web/src/views/trend/trendModel.ts`＋`web/tests/trendModel.test.ts`（用 S0 fixture 與期望值）；② `TrendView.vue`、`ItemPicker.vue`、`TrendChart.vue`、趨勢表、匯出、路由與導覽；③ 各頁「看趨勢」入口（§3.3 表格） | agy #2 | S0 | 前端改動＋測試 |
-| C | `scripts/check_series.py`（見 §5），**不 import `build.py` 的 series 邏輯**；輸出 `reports/check_series.md` | Claude | S0 | 檢核腳本＋報告 |
+| C | `scripts/check_series.py`（見 §5），**不 import `build.py` 的 series 邏輯**；輸出 `reports/check_series.md`；**不得讀 Lane A 的 worktree（`../wb-series-a`）或 `feat/series-a` 分支** | agy #3（Claude Sonnet） | S0 | 檢核腳本＋報告 |
 | R1 | Code review：Lane A | Claude | A | 審查意見 |
 | R2 | Code review：Lane B | Claude | B | 審查意見 |
+| R3 | Code review：Lane C（含確認沒有 import `build.py` 的 series 邏輯） | Claude | C | 審查意見 |
 | V1 | 整合驗證與端到端檢查 | Claude | 全部 | 驗證報告 |
+
+### S0 契約
+
+- **產出（路徑固定）**
+  - `docs/series-contract.md`：§3.1 schema 定稿、canonical 演算法、§3.2 計算規則、前端 `SeriesData` TypeScript 型別草稿（Lane B 照抄進 `web/src/data/types.ts`，S0 不碰 `web/**`），以及「必備案例 → fixture key」對照表。
+  - `tests/fixtures/series_sample.json`：符合 §3.1 schema 的 3 年 fixture（`years`、`items`、`aliases`）。
+  - `tests/fixtures/series_expected.json`：每個 fixture 項目逐年的差額／增減率／指數期望值。由 Claude 依 §3.2 **手算**（不從任何實作產生）。
+  - `tests/test_series_fixture.py`：只用標準函式庫，檢查 fixture 本身（不測實作）。
+- **必備案例**：114 `04-03`→`04-02` 改碼；被擠掉的 `revenue:04-02@114`（含 `aliases` 兩列）；中間年缺值（`09120010101`）；只出現一年；改名（`name_changed=true`）；0 值（含前一年為 0、兩年皆 0）；負增減；鏈式改碼（合成案例，用不存在的代碼，標明為合成）；指數基準年不是第一年（第一年為 `null` 或 0）。
+- **完成判定**（全部成立才算完成）：
+  1. `python3 -m unittest tests.test_series_fixture` 通過，至少檢查：兩檔都是合法 JSON；每個項目都有 §3.1 的必填欄位，且 `amount_元` 的年度鍵和 `years` 相同；`aliases` 的值都存在於 `items`；`parent_key`／`children` 逐年互相一致；上列每個必備案例在 `series-contract.md` 對照表中都有一個 fixture key 存在；`series_expected.json` 的 key 集合等於 `series_sample.json` 的 `items`。
+  2. 契約文件裡的 TS 型別能描述 fixture：Claude 在 `web/` 外的 scratchpad 用 `npx tsc --noEmit` 對「型別＋`import` fixture」做型別檢查並通過（不改 `web/**`）。
+  3. 使用者看過契約文件與 fixture 並明確同意。
+- **回復**：S0 只是 `feat/series` 上的一個本機 commit（未 push），`git reset --hard <base>` 或刪除 `feat/series`（刪除前需使用者同意）即可回到計畫狀態。
+- **預算**：Claude 自己做，預計 1 個工作段；fixture 不超過約 15 個項目。
+- **停止條件**：必備案例中任何一個無法用 §3.1 的規則表達（表示 schema 有洞）→ 停下修計畫並重新給使用者核准；使用者對契約有異議 → 停下修改，不派工。
+
+**分支與基底**（所有 lane 都從含契約的 commit 出發）：
+
+1. 使用者核准後：`git switch -c feat/series docs/plan-series`（基底含本計畫）。
+2. Claude 在 `feat/series` 完成 S0 → 經使用者同意後 commit（記為 `S0_COMMIT`）。驗證：`git ls-tree -r --name-only S0_COMMIT tests/fixtures/` 要列出兩個 fixture 檔。
+3. 從 `S0_COMMIT` 開 agy 的 worktree：`git worktree add ../wb-series-a -b feat/series-a feat/series`、`git worktree add ../wb-series-b -b feat/series-b feat/series`、`git worktree add ../wb-series-c -b feat/series-c feat/series`。
+4. Lane C 由 agy #3（模型 Claude Sonnet，2026-11-21 使用者指定）在 `../wb-series-c` 做；為了保持檢核獨立，agy #3 不得讀 Lane A 的 worktree 或分支，只能依契約、CSV 與既有 `site/data` 寫腳本。Claude 審查後 commit 到 `feat/series-c`，與 A、B 一起合併進 `feat/series`。
+5. A、B、C 完成並通過 R1／R2／R3 後，`git merge --no-ff feat/series-a`、`feat/series-b`、`feat/series-c` 進 `feat/series`，再跑 Gate。
+6. 最後的 PR 是 `feat/series` → `main`，內含本計畫、契約、A、B、C 的全部 commit。
+7. **commit 權限**：CLAUDE.md 規定 commit 前要列檔案清單與訊息並等使用者確認。核准本計畫時，使用者可以另外授權「`feat/series*` 本機分支的 commit 不必逐次確認（不含 push／PR）」；沒有授權就每次都問。agy 在自己的 worktree **不 commit**，由 Claude 審查 diff 後依上述規則 commit。
 
 **檔案擁有權**（避免衝突；超出自己範圍的檔案一律不碰，需要時回報主 session）：
 
 | Lane | 可以改的檔案 |
 |---|---|
-| S0（Claude） | `tests/fixtures/series_sample.json`、`tests/fixtures/series_expected.json`、本計畫 |
+| S0（Claude） | `docs/series-contract.md`、`tests/fixtures/series_sample.json`、`tests/fixtures/series_expected.json`、`tests/test_series_fixture.py`、本計畫 |
 | A（agy #1） | `scripts/build.py`、`tests/test_series.py`、`site/data/series.json`、`site/data/index.json`（由 build 產生） |
 | B（agy #2） | `web/**`（含 `router.ts`、導覽、各 view 的入口連結） |
-| C（Claude） | `scripts/check_series.py`、`reports/check_series.md` |
+| C（agy #3） | `scripts/check_series.py`、`reports/check_series.md` |
 
 平行規則：
 
-- 每條 agy 線用獨立 worktree：`git worktree add ../wb-series-a -b feat/series-a main`、`../wb-series-b -b feat/series-b main`；不在同一個 checkout 切換；完成後 `git worktree remove`。
+- 每條 agy 線用獨立 worktree，基底一律是 `S0_COMMIT`（見上方「分支與基底」），不是 `main`；不在同一個 checkout 切換；合併後 `git worktree remove`。
 - A 與 B 只透過 S0 契約溝通；B 用 fixture，不等 A 完成。
 - A、B 完成後合併到整合分支 `feat/series`，再跑全部檢核；不直接推 `main`。
 - agy 在 herdr 的**可見 pane** 開啟；選模型前先讀畫面確認游標位置。
@@ -183,6 +210,8 @@ v1 的 5 條線（A1/A2/B1/B2/B3）縮成 2 條 agy 線：整個功能只有 3 �
 - 前端：URL 參數非法的處理；a11y（圖表有表格對照）；8 個項目時的效能與圖例可讀性。
 - 測試：新測試在沒有實作時會失敗；沒有只複述實作的測試。
 - 審查結果分級（阻擋／建議），阻擋項退回 agy 修正後由 Claude **重跑 D1–D9** 再放行。
+- **修正迴圈上限**：每條 lane 的「退回 agy 修正 → 重跑 D1–D9＋review」最多 **2 輪**。第 2 輪後仍有阻擋項 → 該 lane 標為暫停，不再派 agy，向使用者報告阻擋項、證據與選項（Claude 接手修正／縮小範圍／放棄該 lane），等使用者決定。每一輪都必須有實質改動；同樣的程式碼不重驗。建議項不觸發新一輪，列入報告。
+- **獨立驗證**：Gate 通過後，再由一個全新的 `verifier` 依 §7 驗收標準獨立驗證一次（本功能涉及序列化輸出，屬必要步驟）。驗證後若有必要的修改，重跑 §7 主要驗收並再做一次全新驗證。
 
 ## 7. 驗收標準
 
@@ -197,8 +226,34 @@ v1 的 5 條線（A1/A2/B1/B2/B3）縮成 2 條 agy 線：整個功能只有 3 �
 - 項目跨年改碼或改名但 crosswalk 沒登記時，會被當成不同項目；做法是列清單給使用者決定，不自動猜。
 - 只有 3 個年度，趨勢圖只有 3 個點；功能設計成年度增加時自動延伸。
 - 已決定（使用者，2026-11-21）：(a) 首版**包含**歲出「用途別」層級；(b) 「看趨勢」入口放在**比較頁、歲出／歲入 drill 節點、搜尋結果**；(c) 比較對象上限 **8 個**；(d) 審查意見全部採納（v2）。
-- **待使用者決定（S0 開始前要問）**：政事別合計、機關合計、跨計畫用途別合計、歲入／歲出總計，首版要不要放進 series？預設為**不含**；若要包含，S0 需補 key 格式（例如 `func:`、`dept:`、`objsum:`、`total:`）、D1 的來源與 §3.3 入口表。
+- 已決定（使用者，2026-11-21）：(e) 政事別合計、機關合計、跨計畫用途別合計、歲入／歲出總計**首版不含**。
+
+## 8.1 停止條件、回復與預算
+
+**停止條件**（發生時暫停受影響的 lane，向使用者報告並等決定；不自行繞過）：
+
+| # | 情況 | 處理 |
+|---|---|---|
+| X1 | 真實資料跑 canonical 演算法時同年撞 key，或出現 §3.1 第 6／7 條的報錯 | 停 Lane A；列出撞號項目，交使用者決定（例如補 `codes.csv`，屬資料變更需另行核准） |
+| X2 | `series.json` ≥ 350KB | 停；回報大小與組成，請使用者決定放寬上限或瘦身方式 |
+| X3 | D8 既有基準退步，或 `unittest` 後出現非預期的檔案變動 | 停全部 lane；先查原因，不合併 |
+| X4 | 任何 lane 需要改 `raw/**`、`data/*.csv`、`corrections.csv`、`codes.csv`，或改到擁有權以外的檔案 | 停該 lane；回報需求，請使用者決定 |
+| X5 | agy 同一 lane 連續 2 次無法完成或產出不可用 | 不第 3 次重派；請使用者決定由 Claude 接手或縮小範圍 |
+| X6 | §6 修正迴圈達 2 輪上限 | 見 §6 |
+| X7 | D1–D9 發現資料本身對不上（不是程式錯誤） | 不自動修正；列入 `reports/check_series.md` 交使用者 |
+
+**回復**（全部在本機分支，尚未 push 前都可完全撤回）：
+
+- S0：見「S0 契約」。
+- Lane A／B／C：`git worktree remove ../wb-series-<a|b|c>`，不合併該分支（刪除分支需使用者同意）。
+- 整個功能：不開 PR 或關閉 PR；`main` 不受影響。若已合併到 `main`，由使用者在 GitHub revert 該 PR（會觸發重新部署）。
+
+**預算**：
+
+- agy：3 個 lane，每個最多 1 次初次派工＋§6 的 2 輪修正（另受 X5 限制）。
+- 獨立審查：計畫結案審查 1 次；Gate 後全新 `verifier` 1 次（驗證後有必要修改時最多再 1 次）。
+- 不新增 npm／Python 相依；不使用雲端付費服務。
 
 ## 9. 流程（遵守 CLAUDE.md）
 
-唯讀探勘（已完成）→ 本計畫 v1 → 獨立審查（已完成，併入 v2）→ **使用者核准 v2 與 §8 待決定事項** → S0 → 實作（agy）＋檢核腳本（Claude）平行 → 獨立驗證與 review（Claude）→ 使用者確認 → Conventional Commits（繁中）、新分支、`gh pr create`，**由使用者自行在 GitHub 合併**。commit 前先列出檔案清單與完整訊息。
+唯讀探勘（已完成）→ 本計畫 v1 → 獨立審查（已完成，併入 v2）→ 第二輪審查（已完成，併入 v3）→ 結案審查 → **使用者核准 v3** → S0 → 實作（agy）＋檢核腳本（Claude）平行 → 獨立驗證與 review（Claude）→ 使用者確認 → Conventional Commits（繁中）、新分支、`gh pr create`，**由使用者自行在 GitHub 合併**。commit 前先列出檔案清單與完整訊息。

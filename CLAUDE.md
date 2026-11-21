@@ -22,11 +22,12 @@ data/<年>/summary.csv, revenue_items.csv, plans.csv, expenditure_items.csv  (+ 
    │  套用 data/corrections.csv；頁碼由目錄頁數與「每頁開頭的表頭」推算
    │  scripts/validate.py <年> [--partial]  → reports/validate_<年>.md（任何失敗 → 退出碼 1）
    ▼
-   │  scripts/build.py  → build/budget.sqlite（gitignore）+ site/data/*.json
+   │  scripts/build.py  → build/budget.sqlite（gitignore）+ site/data/*.json（含 compare_*.json、series.json）
    ▼
 site/（純靜態）→ GitHub Pages（.github/workflows/pages.yml，push 到 main 時部署 ./site）
 ```
 
+- `site/data/series.json`：跨年度時間序列（逐年趨勢頁的資料來源），規則見下方「逐年趨勢（series.json）」；`scripts/check_series.py` 從 CSV 獨立重算並檢核。
 - `scripts/match_items.py <舊年> <新年>`：明細層級跨年度配對工具（產出 `data/crosswalk/items_candidates.csv`、`items.csv`），**目前沒有接進網站**，網站的比較只到款／項／細目／計畫層級。
 - `data/crosswalk/codes.csv`：跨年度代碼對照。`build.py` 的 `_remap_compare_item_codes` 在比較配對前換代碼，只套用在登記的年度對（例如 114 的項 04-03 ＝ 115 的項 04-02「廢舊物資售價」，115→116 不受影響）。
 
@@ -46,9 +47,9 @@ site/（純靜態）→ GitHub Pages（.github/workflows/pages.yml，push 到 ma
 ## 技術與慣例
 
 - **Python 3.14，只用標準函式庫**（`html.parser`、`csv`、`sqlite3`、`difflib`、`argparse`、`unittest`）。不要引入 pandas、BeautifulSoup 等套件。
-- **前端是 `web/`**：Vue 3 + TypeScript + Vite 6 + vue-router（hash）+ ECharts 5.5.1 + MiniSearch 7.1.0（皆 npm 版、鎖版本）。`cd web && npm ci && npm test && npm run build`，輸出 `web/dist`；資料讀 `site/data/*.json`（`site/` 現在只放 `build.py` 產生的資料）。頁面：總覽／歲出（政事別、機關別、用途別）／歲入／比較／搜尋／參考表／備註。資料轉換層在 `web/src/data/`，各頁在 `web/src/views/`，共用元件在 `web/src/components/`。舊的原生 JS 前端（`site/app.js` 等）已於 2026-11-20 移除，需要時從 git 歷史找。
-- 前端路由用 URL hash：`#/<年>/<總覽|歲出|歲入|比較|搜尋|參考表|備註>?<參數>`（drill 路徑 `path=<節點id;節點id…>`、歲出視角 `view=`）；`參考表` 只有 114 顯示（`index.json` 的 `reference_years`），`備註` 只在 `index.json` 的 `memo_years` 含該年度時顯示。比較頁依檢視年度挑相鄰年度對：(Y, Y+1) 存在就用，否則 (Y-1, Y)；`compare.json` 等於最新一對。
-- 檔案分工：`parse_book.py`（約 1,650 行，解析與修正套用）、`memos.py`（備註表與 PDF 頁碼對照的載入、定位與驗證）、`validate.py`（驗證與報告）、`build.py`（SQLite 與網站 JSON、參考表、比較、備註）、`web/src/`（前端：路由、畫面、資料轉換）。
+- **前端是 `web/`**：Vue 3 + TypeScript + Vite 6 + vue-router（hash）+ ECharts 5.5.1 + MiniSearch 7.1.0（皆 npm 版、鎖版本）。`cd web && npm ci && npm test && npm run build`，輸出 `web/dist`；資料讀 `site/data/*.json`（`site/` 現在只放 `build.py` 產生的資料）。頁面：總覽／歲出（政事別、機關別、用途別）／歲入／比較／趨勢／搜尋／參考表／備註。資料轉換層在 `web/src/data/`，各頁在 `web/src/views/`，共用元件在 `web/src/components/`。舊的原生 JS 前端（`site/app.js` 等）已於 2026-11-20 移除，需要時從 git 歷史找。
+- 前端路由用 URL hash：`#/<年>/<總覽|歲出|歲入|比較|趨勢|搜尋|參考表|備註>?<參數>`（drill 路徑 `path=<節點id;節點id…>`、歲出視角 `view=`）；`參考表` 只有 114 顯示（`index.json` 的 `reference_years`），`備註` 只在 `index.json` 的 `memo_years` 含該年度時顯示；`趨勢` 只在 `index.json` 的 `series_years` 至少 2 年時顯示（頁面參數見下方「逐年趨勢」）。比較頁依檢視年度挑相鄰年度對：(Y, Y+1) 存在就用，否則 (Y-1, Y)；`compare.json` 等於最新一對。
+- 檔案分工：`parse_book.py`（約 1,650 行，解析與修正套用）、`memos.py`（備註表與 PDF 頁碼對照的載入、定位與驗證）、`validate.py`（驗證與報告）、`build.py`（SQLite 與網站 JSON、參考表、比較、備註、series）、`check_series.py`（series.json 獨立檢核）、`web/src/`（前端：路由、畫面、資料轉換；趨勢頁在 `web/src/views/trend/` 與 `TrendView.vue`）。
 - SQLite 表：`summary`、`revenue_items`、`plans`、`expenditure_items`、`crosswalk_codes`、`crosswalk_items`、`crosswalk_items_candidates`、`memos`；有「未解決」旗標欄位（`unresolved*`），來源是 `corrections.csv` 中 `field=_known_diff` 且 `new=UNRESOLVED` 的列（機制存在，**目前沒有登記任何一筆**）。
 
 ### CSV 欄位
@@ -78,6 +79,18 @@ site/（純靜態）→ GitHub Pages（.github/workflows/pages.yml，push 到 ma
 - 參考表的處理順序：(1) 單格文字修正 → (2) 整列取代／刪除 → (3) 重編 `row_idx` 為連續。**所有 locator 一律寫「原始」列號**（OCR HTML 解析後、套用任何修正之前），不是 CSV 裡看到的新列號；同一頁在整列修正之後的列若還要加單格修正，也要寫原始列號。同一原始列不可同時有單格與整列修正（會 raise）。整列修正的替換列必須明確列出該列所有未被上方 rowspan 覆蓋的欄（空格寫 `[col,1,1,""]`），因為 `web/src/views/reference/referenceModel.ts` 只把每列的格子排序後直接輸出 `<td>`、不補空洞，漏格會讓整列往左偏。
 - 欄位值可用 `||` 把一列拆成多列。
 - 修正筆數：`parse_book.py` 會印出套用／未套用／未登記異常；三者要分別是 N／0／0。
+
+## 逐年趨勢（series.json）
+
+跨 114–116 看單一項目的逐年金額、差額、增減率，並可自選最多 8 個項目（可跨歲入／歲出、不同層級）獨立比較。完整規格是 `docs/series-contract.md`（schema 與規則的唯一依據）；`docs/PLAN-series.md` 是當初的計畫與分工紀錄。
+
+- **收錄範圍**：歲入款／項／子目／細目、歲出工作計畫、計畫下用途別（`object:<計畫碼>|<用途別碼>`）。**不含**政事別、機關、跨計畫用途別合計與歲入／歲出總計。
+- **缺值一律 `null`，不補 0。** 差額與增減率要**相鄰兩年都有值**才算，缺值年**不跳過去比更早的年度**；這與 `compare_*.json` 的 `diff_元`（缺值當 0）刻意不同。差額、增減率、指數都不存在 JSON 裡，由前端 `web/src/views/trend/trendModel.ts` 計算。
+- **canonical key 與 `aliases`**：歲入項目的代碼依 `data/crosswalk/codes.csv` 沿年度鏈換成最新代碼；被別的舊代碼「認領」而斷鏈的項目加 `@<年>` 後綴（例如 114 的財產售價是 `revenue:04-02@114`，114 項 04-03 的廢舊物資售價則併入 `revenue:04-02`）。`aliases` 記錄所有 `"<年>:<原始key>"` → canonical key。**解析一律先查 `aliases`，查不到才把原始 key 當 canonical key**；不能先查 `items`，否則 `114:revenue:04-02` 會誤命中廢舊物資售價。
+- **改 `codes.csv` 會影響 series**：`build.py` 遇到計畫代碼、非相鄰年度列，或同年撞 key 會直接報錯，不默默略過。
+- **趨勢頁網址**：`#/<年>/趨勢?items=<key;key…>&mode=amount|yoy|index`；`items` 可放 canonical key 或 `<年>:<原始key>`。「看趨勢」入口在歲入 drill、歲出 drill（只限工作計畫與計畫下用途別）、比較頁（key 是年度對**舊年度**的代碼）與搜尋結果。
+- **體積**：`series.json` 約 345KB，上限 350KB（測試有 assert）；再增加年度很可能超過，屆時要評估放寬上限或瘦身欄位。
+- **檢核**：`python3 scripts/check_series.py` 從 CSV 獨立重算（不 import `build.py`），做 D1–D9，輸出 `reports/check_series.md`，任一失敗退出碼為 1。`--skip-build` 跳過 D6、`--skip-baseline` 跳過 D8。D6 會跑兩次 `build.py`、D8 會跑 `validate.py` 與 `unittest`，都會重寫 `data/`、`reports/`，跑完要 `git status --short` 確認沒有意外變動。D7 的抽樣清單要人工對照原件，「人工核對」欄不會自動填。
 
 ## 備註表（資料備註）
 
@@ -114,7 +127,8 @@ site/（純靜態）→ GitHub Pages（.github/workflows/pages.yml，push 到 ma
 python3 scripts/parse_book.py 114 --partial --reference-tables
 python3 scripts/validate.py 114 --partial
 python3 scripts/build.py                       # 決定性：重跑不應產生差異
-python3 -m unittest discover -s tests          # 約 100 個（Python）；前端測試在 web/：cd web && npm test
+python3 scripts/check_series.py                # series.json 獨立檢核 D1–D9（見「逐年趨勢」）
+python3 -m unittest discover -s tests          # 約 120 個（Python）；前端測試在 web/：cd web && npm test
 ```
 
 **重要副作用**：`unittest discover` 會對真實 repo 重跑 `parse_book.py 116` 與 `validate.py 116`，寫回 `data/116/*.csv` 與 `reports/validate_116.md`。結果必須與 `HEAD` 完全相同（冪等）；跑完請 `git status --short` 確認沒有意外變動。
@@ -146,7 +160,7 @@ python3 -m unittest discover -s tests          # 約 100 個（Python）；前�
 ### 其他未完成
 - `raw/114/part2.md` 的 p27 歲出機關別預算表下半部遺失、p16–p17、p18–p19 兩組表格被合併，目前 parser 不解析（`docs/TODO.md` T5 待辦 3）。
 - p91–p173 的歲出明細以外，114 的 p1–p90 尚無「二次獨立讀取＋逐格比對」；說明文字、名稱、單位這類沒有數字約束的欄位是盲區。
-- 跨兩年以上的比較（例如 114 vs 116）與明細層級的跨年度配對（`match_items.py`）尚未接進網站。
+- 明細層級（說明欄各列）的跨年度配對（`match_items.py`）尚未接進網站；跨年度比較目前只到款／項／子目／細目／工作計畫／用途別（趨勢頁）。
 
 ## 踩過的坑
 
@@ -162,12 +176,12 @@ python3 -m unittest discover -s tests          # 約 100 個（Python）；前�
 ```
 raw/<年>/                 OCR 原文（唯讀）；115 另有 ocr_exp/ ocr_rev/ toc.md original/
 data/<年>/                CSV；data/corrections.csv；data/memos.csv；data/pdf_sources.csv；data/crosswalk/codes.csv
-scripts/                  parse_book.py  validate.py  build.py  memos.py  match_items.py
-reports/                  validate_<年>.md（由 validate.py 產生，會進 git）
+scripts/                  parse_book.py  validate.py  build.py  memos.py  match_items.py  check_series.py
+reports/                  validate_<年>.md（由 validate.py 產生，會進 git）  check_series.md（由 check_series.py 產生）
 site/                     data/*.json（由 build.py 產生，會進 git；前端 web/ 讀取）
 web/                      Vue 3 + Vite 前端（src/data 轉換層、src/views 各頁、src/components、tests）
 build/budget.sqlite       本機 SQLite（gitignore）
-tests/                    test_s1/s2/s3、test_build、test_compare、test_memos*、test_validate_agency；fixtures/
-docs/                     PLAN.md  TODO.md  MEMOS.md  evidence/<年>/*.png
+tests/                    test_s1/s2/s3、test_build、test_compare、test_memos*、test_validate_agency、test_series、test_series_fixture；fixtures/（含 series_sample／series_expected）
+docs/                     PLAN.md  TODO.md  MEMOS.md  PLAN-series.md  series-contract.md  evidence/<年>/*.png
 議事記錄_依科室分類.md    鄉民代表會議事記錄筆記，與預算資料庫無關
 ```

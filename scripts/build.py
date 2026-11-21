@@ -1235,6 +1235,189 @@ def _write_compare_files(
         _write_json_deterministic(site_path / "compare.json", latest)
 
 
+def _build_series_json(
+    years: list[int],
+    compare_items_by_year: dict[int, dict[str, dict[str, Any]]],
+    codes_rows: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """彙整多年度項目為 series.json 結構（依 docs/series-contract.md §2–§3）。"""
+    sorted_years = sorted(years)
+    if len(sorted_years) < 2:
+        raise ValueError("series.json 至少需要 2 個年度")
+
+    all_plan_codes = {
+        item["code"]
+        for y in sorted_years
+        for item in compare_items_by_year.get(y, {}).values()
+        if item["kind"] == "plan"
+    }
+
+    step_from_to: dict[int, dict[str, str]] = defaultdict(dict)
+    step_to_set: dict[int, set[str]] = defaultdict(set)
+    for row in codes_rows or []:
+        fy = int(row["from_year"])
+        ty = int(row["to_year"])
+        fc = (row.get("from_code") or "").strip()
+        tc = (row.get("to_code") or "").strip()
+        if ty != fy + 1:
+            raise ValueError(
+                f"codes.csv 出現非相鄰年度列：{fy} -> {ty} ({fc} -> {tc})"
+            )
+        if not fc or not tc:
+            continue
+        if fc in all_plan_codes or tc in all_plan_codes:
+            raise ValueError(
+                f"codes.csv 出現計畫代碼（{fc} -> {tc}）：plan 改碼需連帶改寫 object key，尚未實作"
+            )
+        if fc in step_from_to[fy] and step_from_to[fy][fc] != tc:
+            raise ValueError(
+                f"codes.csv 在年度 {fy}->{ty} 對同一個 from_code={fc!r} 登記了多個不同 to_code"
+            )
+        step_from_to[fy][fc] = tc
+        step_to_set[fy].add(tc)
+
+    max_year = sorted_years[-1]
+
+    def _resolve_revenue_canonical(start_year: int, start_code: str) -> tuple[str, str]:
+        cur_year = start_year
+        cur_code = start_code
+        while cur_year < max_year:
+            from_to = step_from_to.get(cur_year)
+            if from_to and cur_code in from_to:
+                cur_code = from_to[cur_code]
+                cur_year += 1
+            elif cur_code in step_to_set.get(cur_year, ()):
+                return f"revenue:{cur_code}@{cur_year}", cur_code
+            else:
+                cur_year += 1
+        return f"revenue:{cur_code}", cur_code
+
+    raw_to_canon_by_year: dict[int, dict[str, str]] = {}
+    merged_by_canon: dict[str, dict[int, dict[str, Any]]] = defaultdict(dict)
+    canon_code_by_key: dict[str, str] = {}
+    aliases: dict[str, str] = {}
+
+    for y in sorted_years:
+        year_items = compare_items_by_year.get(y, {})
+        y_map: dict[str, str] = {}
+        seen_in_year: dict[str, str] = {}
+        for raw_key, item in year_items.items():
+            if item["kind"] == "revenue":
+                canon_key, canon_code = _resolve_revenue_canonical(y, item["code"])
+            else:
+                canon_key = raw_key
+                canon_code = item["code"]
+
+            if canon_key in seen_in_year:
+                raise ValueError(
+                    f"年度 {y} 有兩個項目對應到同一個 canonical key {canon_key!r}："
+                    f"{seen_in_year[canon_key]!r} 與 {raw_key!r}"
+                )
+            seen_in_year[canon_key] = raw_key
+            y_map[raw_key] = canon_key
+            merged_by_canon[canon_key][y] = item
+            canon_code_by_key[canon_key] = canon_code
+            if raw_key != canon_key:
+                aliases[f"{y}:{raw_key}"] = canon_key
+        raw_to_canon_by_year[y] = y_map
+
+    kind_order = {"revenue": 0, "plan": 1, "object": 2}
+    rev_level_order = {"款": 0, "項": 1, "子目": 2, "細目": 3}
+
+    def _item_sort_key(canon_key: str) -> tuple[int, int, str]:
+        per_year = merged_by_canon[canon_key]
+        latest_item = per_year[max(per_year)]
+        return (
+            kind_order.get(latest_item["kind"], 9),
+            rev_level_order.get(latest_item["level"], 9),
+            canon_key,
+        )
+
+    items_out: dict[str, dict[str, Any]] = {}
+    for canon_key in sorted(merged_by_canon, key=_item_sort_key):
+        per_year = merged_by_canon[canon_key]
+        present_years = [y for y in sorted_years if y in per_year]
+        latest_item = per_year[present_years[-1]]
+        kind = latest_item["kind"]
+        level = latest_item["level"]
+
+        name_by_year = {str(y): per_year[y]["name"] for y in present_years}
+        amount_by_year = {
+            str(y): (per_year[y]["amount_元"] if y in per_year else None)
+            for y in sorted_years
+        }
+        page_by_year = {
+            str(y): {
+                "page": per_year[y]["page"],
+                "page_start": per_year[y]["page_start"],
+                "page_end": per_year[y]["page_end"],
+            }
+            for y in present_years
+        }
+        parent_by_year: dict[str, str | None] = {}
+        children_by_year: dict[str, list[str]] = {}
+        dept_by_year: dict[str, str] = {}
+        unresolved_by_year: dict[str, bool] = {}
+
+        for y in present_years:
+            ys = str(y)
+            it = per_year[y]
+            y_map = raw_to_canon_by_year[y]
+            raw_parent = it.get("parent_key")
+            parent_by_year[ys] = (
+                y_map.get(raw_parent, raw_parent) if raw_parent is not None else None
+            )
+            children_by_year[ys] = sorted(
+                y_map.get(ck, ck) for ck in it.get("children_keys", [])
+            )
+            dept_by_year[ys] = it.get("dept") or ""
+            unresolved_by_year[ys] = bool(it.get("unresolved", False))
+
+        entry: dict[str, Any] = {
+            "kind": kind,
+            "level": level,
+            "code": canon_code_by_key[canon_key],
+            "display_name": name_by_year[str(present_years[-1])],
+            "name": name_by_year,
+            "amount_元": amount_by_year,
+            "page": page_by_year,
+            "parent_key": parent_by_year,
+            "children": children_by_year,
+            "dept": dept_by_year,
+        }
+        if kind in ("plan", "object"):
+            entry["政事別"] = {str(y): per_year[y].get("政事別", "") for y in present_years}
+        entry["unresolved"] = unresolved_by_year
+        entry["name_changed"] = len(set(name_by_year.values())) > 1
+        items_out[canon_key] = entry
+
+    return {
+        "years": sorted_years,
+        "items": items_out,
+        "aliases": dict(sorted(aliases.items())),
+    }
+
+
+def _write_series_file(
+    site_path: Path,
+    years: list[int],
+    compare_items_by_year: dict[int, dict[str, dict[str, Any]]],
+    codes_rows: list[dict[str, Any]] | None = None,
+) -> list[int]:
+    """輸出多年度時間序列 series.json，並回傳納入的年度清單。
+
+    少於兩年時不輸出，並清除殘留的 series.json，回傳 []。
+    """
+    series_path = site_path / "series.json"
+    if len(years) < 2:
+        if series_path.is_file():
+            series_path.unlink()
+        return []
+    series_data = _build_series_json(years, compare_items_by_year, codes_rows)
+    _write_json_deterministic(series_path, series_data)
+    return list(series_data["years"])
+
+
 # 參考表各表的金額單位（CSV 沒有單位欄；以 source_table 目次標題為鍵，已對照 raw/114/part3.md 頁首）。
 # 對不到的表名 unit 為 null，前端顯示「單位請見原書該頁」，不猜。
 _REFERENCE_UNITS = {
@@ -1771,6 +1954,8 @@ def build(
     finally:
         conn.close()
 
+    series_years = _write_series_file(site_path, years, compare_items_by_year, codes_rows)
+
     index_json: dict[str, Any] = {
         "years": years,
         "default_year": years[-1] if years else None,
@@ -1782,6 +1967,7 @@ def build(
         },
         "reference_years": ref_years,
         "memo_years": memo_years,
+        "series_years": series_years,
     }
     _write_json_deterministic(site_path / "index.json", index_json)
     _write_json_deterministic(site_path / "search.json", all_search_docs)

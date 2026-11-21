@@ -1,0 +1,101 @@
+{
+  "_note": "依 docs/series-contract.md §4 計算規則手算的期望值，不由任何實作產生。diff_元／pct 的第一年恆為 null（沒有前一年）。index_base_year 為 null 時整條 index 為 null。",
+  "items": {
+    "revenue:04": {
+      "diff_元": {"114": null, "115": 420000, "116": 550000},
+      "pct": {"114": null, "115": 33.6, "116": 32.93},
+      "index_base_year": 114,
+      "index": {"114": 100, "115": 133.6, "116": 177.6}
+    },
+    "revenue:04-02": {
+      "diff_元": {"114": null, "115": 100000, "116": 0},
+      "pct": {"114": null, "115": 500, "116": 0},
+      "index_base_year": 114,
+      "index": {"114": 100, "115": 600, "116": 600}
+    },
+    "revenue:04-02@114": {
+      "diff_元": {"114": null, "115": null, "116": null},
+      "pct": {"114": null, "115": null, "116": null},
+      "index_base_year": 114,
+      "index": {"114": 100, "115": null, "116": null}
+    },
+    "revenue:07120010200": {
+      "diff_元": {"114": null, "115": null, "116": null},
+      "pct": {"114": null, "115": null, "116": null},
+      "index_base_year": 114,
+      "index": {"114": 100, "115": null, "116": null}
+    },
+    "revenue:07120010201": {
+      "diff_元": {"114": null, "115": null, "116": null},
+      "pct": {"114": null, "115": null, "116": null},
+      "index_base_year": 114,
+      "index": {"114": 100, "115": null, "116": null}
+    },
+    "revenue:07120010500": {
+      "diff_元": {"114": null, "115": 100000, "116": 0},
+      "pct": {"114": null, "115": 500, "116": 0},
+      "index_base_year": 114,
+      "index": {"114": 100, "115": 600, "116": 600}
+    },
+    "revenue:07120010501": {
+      "diff_元": {"114": null, "115": 100000, "116": 0},
+      "pct": {"114": null, "115": 500, "116": 0},
+      "index_base_year": 114,
+      "index": {"114": 100, "115": 600, "116": 600}
+    },
+    "revenue:05120010104": {
+      "diff_元": {"114": null, "115": null, "116": null},
+      "pct": {"114": null, "115": null, "116": null},
+      "index_base_year": null,
+      "index": {"114": null, "115": null, "116": null}
+    },
+    "revenue:09120010101": {
+      "diff_元": {"114": null, "115": null, "116": null},
+      "pct": {"114": null, "115": null, "116": null},
+      "index_base_year": 114,
+      "index": {"114": 100, "115": null, "116": 2.63}
+    },
+    "revenue:99-03": {
+      "diff_元": {"114": null, "115": 50, "116": -30},
+      "pct": {"114": null, "115": 50, "116": -20},
+      "index_base_year": 114,
+      "index": {"114": 100, "115": 150, "116": 120}
+    },
+    "revenue:99-10": {
+      "diff_元": {"114": null, "115": 0, "116": 500},
+      "pct": {"114": null, "115": 0, "116": null},
+      "index_base_year": 116,
+      "index": {"114": 0, "115": 0, "116": 100}
+    },
+    "revenue:99-20": {
+      "diff_元": {"114": null, "115": null, "116": 100},
+      "pct": {"114": null, "115": null, "116": 50},
+      "index_base_year": 115,
+      "index": {"114": null, "115": 100, "116": 150}
+    },
+    "plan:37120010105": {
+      "diff_元": {"114": null, "115": null, "116": null},
+      "pct": {"114": null, "115": null, "116": null},
+      "index_base_year": 115,
+      "index": {"114": null, "115": 100, "116": null}
+    },
+    "plan:51120019101": {
+      "diff_元": {"114": null, "115": null, "116": null},
+      "pct": {"114": null, "115": null, "116": null},
+      "index_base_year": 114,
+      "index": {"114": 100, "115": null, "116": 406.62}
+    },
+    "object:51120019101|3010": {
+      "diff_元": {"114": null, "115": null, "116": null},
+      "pct": {"114": null, "115": null, "116": null},
+      "index_base_year": 114,
+      "index": {"114": 100, "115": null, "116": 350.8}
+    },
+    "object:51120019101|3035": {
+      "diff_元": {"114": null, "115": null, "116": null},
+      "pct": {"114": null, "115": null, "116": null},
+      "index_base_year": 116,
+      "index": {"114": null, "115": null, "116": 100}
+    }
+  }
+}

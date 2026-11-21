@@ -16,11 +16,13 @@ import {
   matchesKindFilter,
   normalizeKindFilter,
   resolveHitLink,
+  resolveHitTrendKey,
   type SearchEngine,
   type SearchHit,
   type SearchKindFilter,
   type YearPathLookup,
 } from "./search/searchModel";
+import { buildTrendRoute } from "./trend/trendModel";
 
 const PAGE_SIZE = 50;
 const EXAMPLE_KEYWORDS = ["遺產稅", "道路", "垃圾", "人事", "獎助"];
@@ -251,6 +253,14 @@ function getLink(hit: SearchHit) {
   return resolveHitLink(hit, pathLookups[hit.year]);
 }
 
+const hasSeries = computed(() => (indexData.value?.series_years?.length ?? 0) >= 2);
+
+function getTrendRoute(hit: SearchHit) {
+  if (!hasSeries.value) return null;
+  const key = resolveHitTrendKey(hit);
+  return key ? buildTrendRoute(routeYear.value || hit.year, key) : null;
+}
+
 function getSnippetSegments(hit: SearchHit) {
   const snippet = buildSnippet(hit.text, activeQuery.value, 160);
   return highlightSegments(snippet, activeQuery.value);
@@ -427,6 +437,9 @@ function getTitleSegments(hit: SearchHit) {
               <li v-if="hit.code" class="muted code-meta">編號：{{ hit.code }}</li>
               <li v-if="hit.unresolved">
                 <span class="tag warn-tag">⚠ 待核對</span>
+              </li>
+              <li v-if="getTrendRoute(hit)">
+                <router-link :to="getTrendRoute(hit)!" class="trend-link">看趨勢</router-link>
               </li>
             </ul>
 
@@ -669,5 +682,24 @@ function getTitleSegments(hit: SearchHit) {
   display: flex;
   justify-content: center;
   padding-top: 4px;
+}
+
+.trend-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--accent);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.trend-link:hover {
+  background: var(--surface-2);
+  text-decoration: underline;
 }
 </style>

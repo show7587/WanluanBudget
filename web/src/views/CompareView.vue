@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, type RouteLocationRaw } from "vue-router";
 import ChartPanel from "@/components/ChartPanel.vue";
 import DataTable from "@/components/DataTable.vue";
 import DiffLegend from "@/components/DiffLegend.vue";
@@ -9,7 +9,9 @@ import { useBudget } from "@/composables/useBudget";
 import { useQueryString } from "@/composables/useRouteState";
 import { DIFF_BANDS } from "@/data/diffScale";
 import { fmtCompact, fmtSignedPct, fmtSignedYuan } from "@/data/format";
+import type { TreeNode } from "@/data/types";
 import DivergingBarChart from "./compare/DivergingBarChart.vue";
+import { buildTrendRoute } from "./trend/trendModel";
 import {
   buildCompareNodes,
   COMPARE_FILTER_KEYS,
@@ -120,6 +122,18 @@ function diffTone(diff: number): "good" | "bad" | "neutral" {
   if (diff > 0) return "good";
   if (diff < 0) return "bad";
   return "neutral";
+}
+
+const hasSeries = computed(() => (index.value?.series_years?.length ?? 0) >= 2);
+
+/**
+ * 比較頁 key 採年度對舊年度（from_year）的代碼，入口一律產生 <a>:<key> 交由趨勢頁經 aliases 解析。
+ * 用途別面向為跨計畫彙總（object:<用途別碼>，無計畫碼），不在 series.json 內故不顯示入口。
+ */
+function trendLinkFor(node: TreeNode): RouteLocationRaw | null {
+  if (!hasSeries.value || !compare.value) return null;
+  if (scope.value === "object") return null;
+  return buildTrendRoute(year.value || compare.value.to_year, `${compare.value.from_year}:${node.id}`);
 }
 </script>
 
@@ -268,6 +282,7 @@ function diffTone(diff: number): "good" | "bad" | "neutral" {
             :nodes="sortedNodes"
             :caption="tableCaption"
             :parent-total="scopeSummary.curTotal"
+            :trend-link-for="trendLinkFor"
             show-diff
           />
         </template>

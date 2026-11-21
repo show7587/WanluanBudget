@@ -17,6 +17,7 @@ export const router = createRouter({
     { path: "/:year(\\d+)/歲出", name: "expenditure", component: () => import("@/views/ExpenditureView.vue"), meta: { title: "歲出" } },
     { path: "/:year(\\d+)/歲入", name: "revenue", component: () => import("@/views/RevenueView.vue"), meta: { title: "歲入" } },
     { path: "/:year(\\d+)/比較", name: "compare", component: () => import("@/views/CompareView.vue"), meta: { title: "比較" } },
+    { path: "/:year(\\d+)/趨勢", name: "trend", component: () => import("@/views/TrendView.vue"), meta: { title: "趨勢" } },
     { path: "/:year(\\d+)/搜尋", name: "search", component: () => import("@/views/SearchView.vue"), meta: { title: "搜尋" } },
     { path: "/:year(\\d+)/參考表", name: "reference", component: () => import("@/views/ReferenceView.vue"), meta: { title: "參考表" } },
     { path: "/:year(\\d+)/備註", name: "memo", component: () => import("@/views/MemoView.vue"), meta: { title: "資料備註" } },
@@ -27,7 +28,7 @@ export const router = createRouter({
       redirect: (to) => {
         const raw = Array.isArray(to.params.pathMatch) ? to.params.pathMatch.join("/") : String(to.params.pathMatch ?? "");
         const p = "/" + raw.replace(/^\/+/, "");
-        return /^\/\d+\/(總覽|歲出|歲入|比較|搜尋|參考表|備註)$/.test(p) ? { path: p, query: to.query, hash: to.hash } : "/";
+        return /^\/\d+\/(總覽|歲出|歲入|比較|趨勢|搜尋|參考表|備註)$/.test(p) ? { path: p, query: to.query, hash: to.hash } : "/";
       },
     },
   ],

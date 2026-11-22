@@ -4,6 +4,8 @@ import { useRoute, useRouter } from "vue-router";
 import { dataSource } from "@/data/source";
 import type { IndexData } from "@/data/types";
 
+const DISCLAIMER = "以萬巒鄉公所公布之預算書為準，僅供快速比對與查閱，請勿引用於其他地方。本站資料可能有誤差。";
+
 const route = useRoute();
 const router = useRouter();
 const index = ref<IndexData | null>(null);
@@ -43,6 +45,7 @@ function changeYear(e: Event): void {
 
 <template>
   <a class="skip" href="#main">跳到主要內容</a>
+  <div class="notice" role="note">{{ DISCLAIMER }}</div>
   <header class="top">
     <router-link class="brand" to="/">萬巒鄉預算查詢</router-link>
     <nav class="nav" aria-label="主要導覽">
@@ -63,7 +66,8 @@ function changeYear(e: Event): void {
     <router-view :key="`${$route.path}`" />
   </main>
   <footer class="foot muted">
-    資料來源：萬巒鄉預算書（OCR 轉檔後人工校正，每筆修正見 data/corrections.csv）。金額單位：元。
+    <p>資料來源：萬巒鄉預算書（OCR 轉檔後人工校正，每筆修正見 data/corrections.csv）。金額單位：元。</p>
+    <p class="disclaimer">{{ DISCLAIMER }}</p>
   </footer>
 </template>
 
@@ -81,6 +85,9 @@ function changeYear(e: Event): void {
 .nav-link.active { background: var(--accent); color: var(--accent-contrast); }
 .tools { margin-left: auto; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 select { font: inherit; padding: 6px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface); color: var(--text); min-height: 36px; }
+.notice { padding: 6px 16px; background: var(--surface-2); border-bottom: 1px solid var(--border); color: var(--text); font-size: var(--fs-sm); text-align: center; }
 .foot { max-width: 1200px; margin: 0 auto; padding: 24px 16px; font-size: var(--fs-sm); }
+.foot p { margin: 0 0 6px; }
+.foot .disclaimer { font-weight: 700; }
 @media (max-width: 640px) { .tools { margin-left: 0; width: 100%; } }
 </style>
